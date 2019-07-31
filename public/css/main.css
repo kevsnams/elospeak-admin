@@ -1,0 +1,54 @@
+body {
+    font-family: 'Nunito', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.home-button-wrapper {
+    margin-top: 20px;
+}
+
+a.home-button {
+    text-align: center;
+    font-size: 24px;
+    display: block;
+    color: rgba(241, 241, 241, 0.9);
+    text-decoration: none;
+    font-weight: 900;
+}
+
+a.home-button:hover {
+    color: #fff;
+    text-decoration: none;
+}
+
+#content-left {
+    background: #2368A2;
+}
+.left-nav-wrapper {
+    margin-top: 20px;
+}
+ul.left-nav li.uk-nav-header {
+    color: #AAD4F5;
+}
+ul.left-nav li.uk-nav-header, ul.left-nav li a {
+    padding: 5px 10px;
+    font-weight: 200;
+}
+ul.left-nav li a {
+    color: #fff;
+}
+ul.left-nav li a:hover {
+    background: #1A4971;
+    color: #fff;
+}
+
+#content-right {
+    background: #fff;
+}
+
+#main-content {
+    padding: 10px;
+}
+
+.page-header {
+    padding: 10px;
+}
