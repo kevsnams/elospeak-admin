@@ -3,13 +3,17 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title>LEGO Admin &#8212; Login</title>
+    <title>LEGO &#8212; @yield('pageTitle')</title>
 
     <link href="https://fonts.googleapis.com/css?family=Nunito:200,400,700i,900i&display=swap" rel="stylesheet">
 
-    <link href="<?php echo url('/') ?>/uikit-3.1.6/css/uikit.min.css" rel="stylesheet">
-    <link href="<?php echo url('/') ?>/css/main.css" rel="stylesheet">
+    <link href="<?php echo url('/uikit-3.1.6/css/uikit.min.css') ?>" rel="stylesheet">
+    <link href="<?php echo url('/css/main.css') ?>" rel="stylesheet">
+
+    @yield('pageCSS')
+
 </head>
 <body>
     <div uk-height-viewport="expand: true" class="main-container">
@@ -57,14 +61,23 @@
         @csrf
     </form>
 
-    <script src="<?php echo url('/') ?>/uikit-3.1.6/js/uikit.min.js"></script>
-    <script src="<?php echo url('/') ?>/uikit-3.1.6/js/uikit-icons.min.js"></script>
+    <script src="<?php echo url('/uikit-3.1.6/js/uikit.min.js') ?>"></script>
+    <script src="<?php echo url('/uikit-3.1.6/js/uikit-icons.min.js') ?>"></script>
+    <script src="<?php echo url('/js/axios.min.js') ?>"></script>
 
     <script>
+        axios.defaults.headers.common = {
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+        }
+
         document.getElementById('logout-button').addEventListener('click', function (event) {
             event.preventDefault();
             document.getElementById('logout-form').submit();
         }, false);
     </script>
+
+    @yield('pageJavascript')
+
 </body>
 </html>
