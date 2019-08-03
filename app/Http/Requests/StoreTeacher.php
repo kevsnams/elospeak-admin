@@ -52,7 +52,7 @@ class StoreTeacher extends FormRequest
             case 'PATCH':
             {
                 return [
-                    'id' => 'required|exists:teachers,id',
+                    'id' => 'required|unique:teachers,id',
                     'username' => 'required|min:6|max:50|unique:teachers,username',
                     'password' => 'required',
                     'password_repeat' => 'required|same:password',
