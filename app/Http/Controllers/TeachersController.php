@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Teacher;
 
-use App\Requests\StoreTeacher as StoreTeacherRequest;
+use App\Http\Requests\StoreTeacher as StoreTeacherRequest;
 
 use Hash;
 
@@ -23,8 +23,10 @@ class TeachersController extends Controller
      */
     public function index()
     {
+        $teachers = Teacher::orderBy('full_name', 'ASC')->get();
+
         return view('teachers.index', [
-            'teachers' => Teacher::all(),
+            'teachers' => $teachers,
             'educationalAttainments' => Teacher::getEducationalAttainmentValues()
         ]);
     }
@@ -64,7 +66,9 @@ class TeachersController extends Controller
 
         $teacher->save();
 
-        return redirect('/teachers');
+        return response()->json([
+            'success' => true
+        ]);
     }
 
     /**

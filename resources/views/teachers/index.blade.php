@@ -6,9 +6,9 @@
 @endsection
 
 @section('content')
-<button class="uk-button uk-button-primary" id="add-teacher" uk-toggle="target: #create-modal"><span uk-icon="icon: plus"></span> Add Teacher</button>
+<button class="uk-button uk-button-primary" id="add-teacher" uk-toggle="target: #teacher-modal"><span uk-icon="icon: plus"></span> Add Teacher</button>
 <hr>
-<table class="uk-table uk-table-divider">
+<table class="uk-table uk-table-divider uk-table-hover">
     <thead>
         <tr>
             <th>Username</th>
@@ -25,11 +25,14 @@
         <?php else: ?>
             <?php foreach ($teachers as $teacher): ?>
                 <tr>
-                    <td><?php echo $teacher->username ?></td>
-                    <td><?php echo $teacher->full_name ?></td>
-                    <td><?php echo $teacher->skype ?></td>
+                    <td class="cursor-hand" data-show-teacher="<?php echo $teacher->id ?>"><?php echo $teacher->username ?></td>
+                    <td class="cursor-hand" data-show-teacher="<?php echo $teacher->id ?>"><?php echo $teacher->full_name ?></td>
+                    <td class="cursor-hand" data-show-teacher="<?php echo $teacher->id ?>"><?php echo $teacher->skype ?></td>
                     <td>
-                        Edit | Delete
+                    <ul class="uk-iconnav">
+                        <li><a href="javascript:;" onclick="teacherModify(<?php echo $teacher->id ?>)"><span uk-icon="icon: file-edit"></span> Modify</a></li>
+                        <li><a href="#"><span uk-icon="icon: trash"></span> Delete</a></li>
+                    </ul>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -37,16 +40,19 @@
     </tbody>
 </table>
 
-<div id="create-modal" uk-modal>
+<div id="teacher-modal" uk-modal>
     <div class="uk-modal-dialog uk-modal-body">
         <h2 class="uk-modal-title">Create Teacher</h2>
-
-        <form id="teacher-create" class="uk-form-stacked" action="<?php echo route('teachers.store') ?>" method="POST">
+        <form id="teacher-form" class="uk-form-stacked" method="POST">
             @csrf
+
+            <input type="hidden" id="username-exists" value="">
+            <input type="hidden" id="email-exists" value="">
+
             <div class="uk-margin">
                 <label class="uk-form-label" for="teacher-username">Username <span class="form-required">*</span></label>
                 <div class="uk-form-controls">
-                    <input class="uk-input" id="teacher-username" required minlength="6" maxlength="50" type="text" data-bouncer-target="#username-error" name="username">
+                    <input class="uk-input" id="teacher-username" data-bouncer-username-exists="#username-exists" required minlength="6" maxlength="50" type="text" data-bouncer-target="#username-error" name="username">
                     <div id="username-error"></div>
                 </div>
             </div>
@@ -84,7 +90,7 @@
                 <div class="uk-width-1-2">
                     <label class="uk-form-label" for="teacher-email">E-Mail <span class="form-required">*</span></label>
                     <div class="uk-form-controls">
-                        <input class="uk-input" id="teacher-email" required type="email" name="email" data-bouncer-target="#email-error">
+                        <input class="uk-input" id="teacher-email" data-bouncer-email-exists="#email-exists" required type="email" name="email" data-bouncer-target="#email-error">
                     </div>
                     <div id="email-error"></div>
                 </div>
@@ -164,16 +170,58 @@
 <script src="<?php echo url('/bouncer-1.4.5/dist/bouncer.polyfills.min.js') ?>"></script>
 <script src="<?php echo url('/tail.DateTime-0.4.14/js/tail.datetime.min.js') ?>"></script>
 <script>
-    tail.DateTime("#teacher-birthday", {
+
+    function teacherModify(id) {
+        var form = document.getElementById('teacher-form');
+        form.setAttribute('action', '<?php echo route('teachers.index') ?>/'+ id);
+
+        var teacherId = document.getElementById('hidden-teacher-id');
+
+        // If teacher id hidden field DOES NOT exists
+        if (!teacherId) {
+            // Create input hidden element, with teacher id value
+            var e = document.createElement('input');
+            e.id = 'hidden-teacher-id';
+            e.name = 'id';
+            e.type = 'hidden';
+            e.value = id;
+
+            form.appendChild(e);
+        } else {
+            // Otherwise, just update the value
+            teacherId.name = 'id';
+            teacherId.value = id;
+        }
+
+        // Add the method spoofer for PUT request
+        var methodSpoof = document.getElementById('hidden-method-spoof');
+
+        if (!methodSpoof) {
+            var e = document.createElement('input');
+            e.id = 'hidden-method-spoof';
+            e.name = "_method";
+            e.type = 'hidden';
+            e.value = 'PUT';
+
+            form.appendChild(e);
+        } else {
+            methodSpoof.name = '_method';
+            methodSpoof.value = 'PUT';
+        }
+
+        UIkit.modal('#teacher-modal').show();
+    }
+
+    var tdt = tail.DateTime("#teacher-birthday", {
         timeFormat: false,
         today: false,
         weekStart: 1,
         position: "top",
-        dateFormat: "F d, YYYY",
+        dateFormat: "d F YYYY",
         closeButton: false
     });
     
-    new Bouncer('#teacher-create', {
+    var fv = new Bouncer('#teacher-form', {
         fieldClass: 'uk-form-danger',
         errorClass: 'uk-text-danger uk-margin uk-text-small',
         disableSubmit: true,
@@ -188,11 +236,110 @@
                 if (!otherField) return false;
 
                 return otherField.value !== field.value;
+            },
+
+            usernameExists: function (field) {
+                var selector = field.getAttribute('data-bouncer-username-exists');
+
+                if (!selector) return false;
+
+                var hiddenPlaceholder = document.querySelector(selector);
+
+                if (!hiddenPlaceholder) return false;
+
+                return hiddenPlaceholder.value === 'exists';
+            },
+
+            emailExists: function (field) {
+                var selector = field.getAttribute('data-bouncer-email-exists');
+
+                if (!selector) return false;
+
+                var hiddenPlaceholder = document.querySelector(selector);
+
+                if (!hiddenPlaceholder) return false;
+
+                return hiddenPlaceholder.value === 'exists';
             }
         },
         messages: {
-            passwordMismatch: 'Passwords do not match'
+            passwordMismatch: 'Passwords do not match',
+            usernameExists: 'Username already exists',
+            emailExists: 'E-Mail Address already exists'
         }
+    });
+
+
+    document.getElementById('add-teacher').addEventListener('click', function (evt) {
+        // Set action = to teacher.store
+        document.getElementById('teacher-form').setAttribute('action', '<?php echo route('teachers.store') ?>');
+
+        // Remove hidden teacher id field
+        var teacherId = document.getElementById('hidden-teacher-id');
+        if (teacherId) teacherId.parentNode.removeChild(teacherId);
+
+        var methodSpoof = document.getElementById('hidden-method-spoof');
+        if (methodSpoof) methodSpoof.parentNode.removeChild(methodSpoof);
+    });
+
+    tdt.on('close', function () {
+        fv.validate(document.getElementById('teacher-birthday'));
+    });
+
+    tdt.on('change', function () {
+        fv.validate(document.getElementById('teacher-birthday'));
+    });
+
+    document.addEventListener('bouncerFormValid', function (evt) {
+        var form = evt.target;
+        var data = serialize(form);
+
+        axios.post(form.getAttribute('action'), data).then(function (r) {
+            if (r.status == 200) {
+                UIkit.notification("<span uk-icon='icon: check'></span> Successfully created a teacher", 'success');
+
+                form.reset();
+
+                setTimeout(function() {
+                    UIkit.modal('#teacher-modal').hide();
+                    window.location.reload();
+                }, 500);
+            }
+        }).catch(function (error) {
+            if (error.response && error.response.status == 422) {
+                UIkit.notification("<span uk-icon='icon: warning'></span> Failed creating a teacher", "danger");
+
+                _.each(error.response.data.errors, function (v, i) {
+                    var firstError = v[0];
+                    
+
+                    // Checks if `username` or `email` is in the error and also checks if 'taken' is part of the first error message
+                    if ((i == 'username' || i == 'email') && /taken/.test(firstError)) {
+                        // Trigger usernameExists() validation error
+                        document.getElementById(i +'-exists').value = 'exists';
+
+                        // Validate that field
+                        fv.validate(document.querySelector('[name="'+ i +'"]'));
+
+                        // Remove the trigger
+                        document.getElementById(i +'-exists').value = '';
+
+                        // I know, it's st00pid.
+                    }
+                });
+            } else {
+                // server timeout?
+            }
+        });
+    }, false);
+
+    document.querySelector('[data-show-teacher]').addEventListener('click', function (evt) {
+        evt.preventDefault();
+
+        var field = evt.target;
+        var teacherId = field.getAttribute('data-show-teacher');
+
+        console.log(teacherId);
     });
 </script>
 @endsection

@@ -61,9 +61,11 @@
         @csrf
     </form>
 
+    <script src="<?php echo url('/js/underscore-1.9.1.min.js') ?>"></script>
     <script src="<?php echo url('/uikit-3.1.6/js/uikit.min.js') ?>"></script>
     <script src="<?php echo url('/uikit-3.1.6/js/uikit-icons.min.js') ?>"></script>
     <script src="<?php echo url('/js/axios.min.js') ?>"></script>
+    <script src="<?php echo url('/js/serialize.js') ?>"></script>
 
     <script>
         axios.defaults.headers.common = {

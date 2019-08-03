@@ -23,20 +23,52 @@ class StoreTeacher extends FormRequest
      */
     public function rules()
     {
-        return [
-            'username' => 'required|min:6|max:50|unique:teachers,username',
-            'password' => 'required',
-            'password_repeat' => 'required|same:password',
-            'full_name' => 'required',
-            'email' => 'required|email|unique:teachers,email',
-            'personal_contact_number' => 'required|numeric',
-            'skype' => 'required|max:30',
-            'address' => 'required|max:250',
-            'educational_attainment' => 'required|in:0,1',
-            'birthday' => [
-                'required',
-                'date_format' => 'F d, Y'
-            ]
-        ];
+        switch($this->method())
+        {
+            case 'GET':
+            case 'DELETE':
+            {
+                return [];
+            }
+            case 'POST':
+            {
+                return [
+                    'username' => 'required|min:6|max:50|unique:teachers,username',
+                    'password' => 'required',
+                    'password_repeat' => 'required|same:password',
+                    'full_name' => 'required',
+                    'email' => 'required|email|unique:teachers,email',
+                    'personal_contact_number' => 'required|numeric',
+                    'skype' => 'required|max:30',
+                    'address' => 'required|max:250',
+                    'educational_attainment' => 'required|in:0,1',
+                    'birthday' => [
+                        'required',
+                        'date_format:d F Y'
+                    ]
+                ];
+            }
+            case 'PUT':
+            case 'PATCH':
+            {
+                return [
+                    'id' => 'required|exists:teachers,id',
+                    'username' => 'required|min:6|max:50|unique:teachers,username',
+                    'password' => 'required',
+                    'password_repeat' => 'required|same:password',
+                    'full_name' => 'required',
+                    'email' => 'required|email|unique:teachers,email',
+                    'personal_contact_number' => 'required|numeric',
+                    'skype' => 'required|max:30',
+                    'address' => 'required|max:250',
+                    'educational_attainment' => 'required|in:0,1',
+                    'birthday' => [
+                        'required',
+                        'date_format:d F Y'
+                    ]
+                ];
+            }
+            default:break;
+        }
     }
 }
