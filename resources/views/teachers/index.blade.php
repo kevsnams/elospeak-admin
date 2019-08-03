@@ -280,7 +280,7 @@
 
         var methodSpoof = document.getElementById('hidden-method-spoof');
         if (methodSpoof) methodSpoof.parentNode.removeChild(methodSpoof);
-    });
+    }, false);
 
     tdt.on('close', function () {
         fv.validate(document.getElementById('teacher-birthday'));
