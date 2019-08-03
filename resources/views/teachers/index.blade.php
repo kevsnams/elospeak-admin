@@ -170,7 +170,7 @@
 <script src="<?php echo url('/bouncer-1.4.5/dist/bouncer.polyfills.min.js') ?>"></script>
 <script src="<?php echo url('/tail.DateTime-0.4.14/js/tail.datetime.min.js') ?>"></script>
 <script>
-
+    // Add 'DOMContentLoaded' ???
     function teacherModify(id) {
         var form = document.getElementById('teacher-form');
         form.setAttribute('action', '<?php echo route('teachers.index') ?>/'+ id);
@@ -333,13 +333,15 @@
         });
     }, false);
 
-    document.querySelector('[data-show-teacher]').addEventListener('click', function (evt) {
-        evt.preventDefault();
+    var showTeacherButtons = document.querySelectorAll('[data-show-teacher]');
 
-        var field = evt.target;
-        var teacherId = field.getAttribute('data-show-teacher');
+    _.each(showTeacherButtons, function (e) {
+        e.addEventListener('click', function (evt) {
+            var field = evt.target;
+            var teacherId = field.getAttribute('data-show-teacher');
 
-        console.log(teacherId);
-    }, false);
+            console.log(teacherId);
+        });
+    });
 </script>
 @endsection
