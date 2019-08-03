@@ -340,6 +340,6 @@
         var teacherId = field.getAttribute('data-show-teacher');
 
         console.log(teacherId);
-    });
+    }, false);
 </script>
 @endsection
