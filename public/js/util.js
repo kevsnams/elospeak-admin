@@ -34,3 +34,15 @@ var serialize = function (form) {
 	return serialized.join('&');
 
 };
+
+function formElementsDisable(formSelector, disabled) {
+	disabled = typeof disabled == 'undefined' ? true : disabled;
+	var form = document.querySelector(formSelector);
+
+	if (!form) return;
+
+	var allElements = form.elements;
+	for (var i = 0, l = allElements.length; i < l; ++i) {
+		allElements[i].disabled = disabled;
+	}
+}

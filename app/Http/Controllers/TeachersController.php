@@ -67,7 +67,8 @@ class TeachersController extends Controller
         $teacher->save();
 
         return response()->json([
-            'success' => true
+            'success' => true,
+            'method' => 'store'
         ]);
     }
 
@@ -79,7 +80,9 @@ class TeachersController extends Controller
      */
     public function show($id)
     {
-        //
+        $teacher = Teacher::find($id);
+
+        return response()->json($teacher);
     }
 
     /**
@@ -100,9 +103,32 @@ class TeachersController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function update(Request $request, $id)
+    public function update(StoreTeacherRequest $request, $id)
     {
-        //
+        $input = $request->validated();
+
+        $teacher = Teacher::find($id);
+        $teacher->username = $input['username'];
+
+        if (isset($input['password']) && !empty($input['password'])) {
+            $password = Hash::make($input['password']);
+            $teacher->password = $password;
+        }
+
+        $teacher->full_name = ucwords($input['full_name']);
+        $teacher->email = $input['email'];
+        $teacher->personal_contact_number = $input['personal_contact_number'];
+        $teacher->skype = $input['skype'];
+        $teacher->address = $input['address'];
+        $teacher->educational_attainment = $input['educational_attainment'];
+        $teacher->birthday = date('Y-m-d', strtotime($input['birthday']));
+
+        $teacher->save();
+
+        return response()->json([
+            'success' => true,
+            'method' => 'update'
+        ]);
     }
 
     /**
@@ -113,6 +139,10 @@ class TeachersController extends Controller
      */
     public function destroy($id)
     {
-        //
+        $teacher = Teacher::find($id);
+        $teacher->delete();
+
+
+        return redirect(route('teachers.index'))->with('statusDelete', 'Successfully Deleted Teacher');
     }
 }

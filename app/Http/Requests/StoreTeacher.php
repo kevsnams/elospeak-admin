@@ -52,12 +52,11 @@ class StoreTeacher extends FormRequest
             case 'PATCH':
             {
                 return [
-                    'id' => 'required|unique:teachers,id',
-                    'username' => 'required|min:6|max:50|unique:teachers,username',
-                    'password' => 'required',
-                    'password_repeat' => 'required|same:password',
+                    'username' => 'required|min:6|max:50|unique:teachers,username,'. $this->input('username') .',username',
+                    'password' => 'sometimes|present',
+                    'password_repeat' => 'sometimes|present|same:password',
                     'full_name' => 'required',
-                    'email' => 'required|email|unique:teachers,email',
+                    'email' => 'required|email|unique:teachers,email,'. $this->input('email') .',email',
                     'personal_contact_number' => 'required|numeric',
                     'skype' => 'required|max:30',
                     'address' => 'required|max:250',
