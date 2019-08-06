@@ -44,18 +44,16 @@ class TeachersController extends Controller
     /**
      * Store a newly created resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param  App\Http\Requests\StoreTeacher  $request
      * @return \Illuminate\Http\Response
      */
     public function store(StoreTeacherRequest $request)
     {
         $input = $request->validated();
 
-        $password = Hash::make($input['password']);
-
         $teacher = new Teacher();
         $teacher->username = $input['username'];
-        $teacher->password = $password;
+        $teacher->password = Hash::make($input['password']);
         $teacher->full_name = ucwords($input['full_name']);
         $teacher->email = $input['email'];
         $teacher->personal_contact_number = $input['personal_contact_number'];
@@ -99,7 +97,7 @@ class TeachersController extends Controller
     /**
      * Update the specified resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param  App\Http\Requests\StoreTeacher  $request
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
@@ -111,11 +109,10 @@ class TeachersController extends Controller
         $teacher->username = $input['username'];
 
         if (isset($input['password']) && !empty($input['password'])) {
-            $password = Hash::make($input['password']);
-            $teacher->password = $password;
+            $teacher->password = Hash::make($input['password']);
         }
 
-        $teacher->full_name = ucwords($input['full_name']);
+        $teacher->full_name = $input['full_name'];
         $teacher->email = $input['email'];
         $teacher->personal_contact_number = $input['personal_contact_number'];
         $teacher->skype = $input['skype'];
@@ -141,7 +138,6 @@ class TeachersController extends Controller
     {
         $teacher = Teacher::find($id);
         $teacher->delete();
-
 
         return redirect(route('teachers.index'))->with('statusDelete', 'Successfully Deleted Teacher');
     }

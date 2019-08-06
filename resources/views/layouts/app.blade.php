@@ -69,6 +69,10 @@
     <script src="<?php echo url('/js/util.js') ?>"></script>
 
     <script>
+        window.legoAdmin = {
+            baseUrl: '<?php echo url('/') ?>'
+        };
+
         axios.defaults.headers.common = {
             'X-Requested-With': 'XMLHttpRequest',
             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
@@ -78,6 +82,10 @@
             event.preventDefault();
             document.getElementById('logout-form').submit();
         }, false);
+
+        function url(path) {
+            return legoAdmin.baseUrl + path;
+        }
     </script>
 
     @yield('pageJavascript')

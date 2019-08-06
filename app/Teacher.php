@@ -23,7 +23,7 @@ class Teacher extends Model
 
     public function getFullNameAttribute($value)
     {
-        return ucwords($value);
+        return mb_convert_case($value, MB_CASE_TITLE);
     }
 
     public function getAgeAttribute() {

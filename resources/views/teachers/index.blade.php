@@ -33,9 +33,9 @@
         <?php else: ?>
             <?php foreach ($teachers as $teacher): ?>
                 <tr>
-                    <td class="cursor-hand" uk-toggle="target: #teacher-show-<?php echo $teacher->id ?>" data-teacher-show="<?php echo $teacher->id ?>"><?php echo $teacher->username ?></td>
-                    <td class="cursor-hand" uk-toggle="target: #teacher-show-<?php echo $teacher->id ?>" data-teacher-show="<?php echo $teacher->id ?>"><?php echo $teacher->full_name ?></td>
-                    <td class="cursor-hand" uk-toggle="target: #teacher-show-<?php echo $teacher->id ?>" data-teacher-show="<?php echo $teacher->id ?>"><?php echo $teacher->skype ?></td>
+                    <td class="cursor-hand" uk-toggle="target: #teacher-show-<?php echo $teacher->id ?>"><?php echo $teacher->username ?></td>
+                    <td class="cursor-hand" uk-toggle="target: #teacher-show-<?php echo $teacher->id ?>"><?php echo $teacher->full_name ?></td>
+                    <td class="cursor-hand" uk-toggle="target: #teacher-show-<?php echo $teacher->id ?>"><?php echo $teacher->skype ?></td>
                     <td>
                         <ul class="uk-iconnav">
                             <li><a href="javascript:;" data-teacher-modify="<?php echo $teacher->id ?>"><span uk-icon="icon: file-edit"></span> Modify</a></li>
@@ -53,6 +53,9 @@
                                     <dt>E-Mail</dt>
                                     <dd><?php echo $teacher->email ?></dd>
 
+                                    <dt>Username</dt>
+                                    <dd><?php echo $teacher->username ?></dd>
+
                                     <dt>Skype</dt>
                                     <dd><?php echo $teacher->skype ?></dd>
 
@@ -62,6 +65,9 @@
                             </div>
                             <div class="uk-width-1-3">
                                 <dl class="uk-description-list">
+                                    <dt>Contact Number</dt>
+                                    <dd><?php echo $teacher->personal_contact_number ?></dd>
+
                                     <dt>Educational Attainment</dt>
                                     <dd><?php echo $teacher->educational_attainment_value ?></dd>
 
@@ -86,7 +92,7 @@
     @method('DELETE')
 </form>
 
-<div id="teacher-modal" uk-modal>
+<div id="teacher-modal" uk-modal data-bg-close="false">
     <div class="uk-modal-dialog uk-modal-body">
         <h2 class="uk-modal-title">Create Teacher</h2>
         <form id="teacher-form" class="uk-form-stacked" method="POST">
@@ -96,7 +102,7 @@
             <input type="hidden" id="email-exists" value="">
 
             <div class="uk-margin">
-                <label class="uk-form-label" for="teacher-username">Username <span class="form-required">*</span></label>
+                <label class="uk-form-label" for="teacher-username">Username <span class="field-required">*</span></label>
                 <div class="uk-form-controls">
                     <input class="uk-input" id="teacher-username" data-bouncer-username-exists="#username-exists" required minlength="6" maxlength="50" type="text" data-bouncer-target="#username-error" name="username">
                     <div id="username-error"></div>
@@ -105,7 +111,7 @@
 
             <div class="uk-grid-small" uk-grid>
                 <div class="uk-width-1-2">
-                    <label class="uk-form-label" for="teacher-password">Password <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-password">Password <span class="field-required">*</span></label>
                     <div class="uk-inline uk-width-expand">
                         <span class="uk-form-icon" uk-icon="icon: lock"></span>
                         <input class="uk-input uk-width-expand" id="teacher-password" required type="password" name="password" data-bouncer-target="#password-error">
@@ -114,7 +120,7 @@
                 </div>
 
                 <div class="uk-width-1-2">
-                    <label class="uk-form-label" for="teacher-password-repeat">Password Repeat <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-password-repeat">Password Repeat <span class="field-required">*</span></label>
                     <div class="uk-inline uk-width-expand">
                         <span class="uk-form-icon" uk-icon="icon: lock"></span>
                         <input class="uk-input uk-width-expand" id="teacher-password-repeat" required data-bouncer-password-match="#teacher-password" type="password" name="password_repeat"  data-bouncer-target="#password-repeat-error">
@@ -126,15 +132,15 @@
             <div class="uk-grid-small" uk-grid>
 
                 <div class="uk-width-1-2">
-                    <label class="uk-form-label" for="teacher-full-name">Full Name <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-full-name">Full Name <span class="field-required">*</span></label>
                     <div class="uk-form-controls">
-                        <input class="uk-input" id="teacher-full-name" required type="text" name="full_name" data-bouncer-target="#full-name-error">
+                        <input class="uk-input" id="teacher-full-name" required maxlength="100" type="text" name="full_name" data-bouncer-target="#full-name-error">
                         <div id="full-name-error"></div>
                     </div>
                 </div>
 
                 <div class="uk-width-1-2">
-                    <label class="uk-form-label" for="teacher-email">E-Mail <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-email">E-Mail <span class="field-required">*</span></label>
                     <div class="uk-form-controls">
                         <input class="uk-input" id="teacher-email" data-bouncer-email-exists="#email-exists" required type="email" name="email" data-bouncer-target="#email-error">
                     </div>
@@ -146,7 +152,7 @@
             <div class="uk-grid-small" uk-grid>
 
                 <div class="uk-width-1-3">
-                    <label class="uk-form-label" for="teacher-personal-contact-number">Contact Number <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-personal-contact-number">Contact Number <span class="field-required">*</span></label>
                     <div class="uk-inline">
                         <span class="uk-form-icon" uk-icon="icon: receiver"></span>
                         <input class="uk-input" id="teacher-personal-contact-number" required type="number" name="personal_contact_number" data-bouncer-target="#personal-contact-number-error">
@@ -155,7 +161,7 @@
                 </div>
 
                 <div class="uk-width-1-3">
-                    <label class="uk-form-label" for="teacher-skype">Skype <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-skype">Skype <span class="field-required">*</span></label>
                     <div class="uk-form-controls">
                         <input class="uk-input" id="teacher-skype" required type="text" name="skype" data-bouncer-target="#skype-error">
                         <div id="skype-error"></div>
@@ -163,7 +169,7 @@
                 </div>
 
                 <div class="uk-width-1-3">
-                    <label class="uk-form-label" for="teacher-birthday">Birthday <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-birthday">Birthday <span class="field-required">*</span></label>
                     <div class="uk-inline">
                         <span class="uk-form-icon" uk-icon="icon: calendar"></span>
                         <input class="uk-input" id="teacher-birthday" autocomplete="off" required type="text" name="birthday" data-bouncer-target="#birthday-error">
@@ -175,7 +181,7 @@
 
             <div class="uk-grid-small" uk-grid>
                 <div class="uk-width-1-1">
-                    <label class="uk-form-label" for="teacher-address">Address <span class="form-required">*</span></label>
+                    <label class="uk-form-label" for="teacher-address">Address <span class="field-required">*</span></label>
                     <div class="uk-inline uk-width-expand">
                         <span class="uk-form-icon" uk-icon="icon: location"></span>
                         <input class="uk-input uk-width-expand" id="teacher-address" required type="text" name="address" maxlength="250" data-bouncer-target="#address-error">
@@ -185,7 +191,7 @@
             </div>
 
             <div class="uk-margin">
-                <label class="uk-form-label" for="teacher-educational-attainment">Educational Attainment <span class="form-required">*</span></label>
+                <label class="uk-form-label" for="teacher-educational-attainment">Educational Attainment <span class="field-required">*</span></label>
                 <div class="uk-form-controls">
                     <select class="uk-select" id="teacher-educational-attainment" required name="educational_attainment" data-bouncer-target="#educational-attainment-error">
                         <option value="">Select...</option>
@@ -217,7 +223,7 @@
 <script src="<?php echo url('/bouncer-1.4.5/dist/bouncer.polyfills.min.js') ?>"></script>
 <script src="<?php echo url('/tail.DateTime-0.4.14/js/tail.datetime.min.js') ?>"></script>
 <script>
-    window.addEventListener('DOMContentLoaded', (event) => {
+    window.addEventListener('DOMContentLoaded', function (event) {
 
         var tdt = tail.DateTime("#teacher-birthday", {
             timeFormat: false,
@@ -276,31 +282,6 @@
             }
         });
 
-
-        document.getElementById('add-teacher').addEventListener('click', function (evt) {
-            // @TODO Add a prompt if modal is open and there are input values in the field(s)
-
-            // Set action = to teacher.store
-            document.getElementById('teacher-form').setAttribute('action', '<?php echo route('teachers.store') ?>');
-
-            // Remove hidden teacher id field
-            var teacherId = document.getElementById('hidden-teacher-id');
-            if (teacherId) teacherId.parentNode.removeChild(teacherId);
-
-            var methodSpoof = document.getElementById('hidden-method-spoof');
-            if (methodSpoof) methodSpoof.parentNode.removeChild(methodSpoof);
-
-            document.getElementById('teacher-form').reset();
-
-            document.getElementById('teacher-password').setAttribute('required', 'required');
-            var teacherPasswordRepeat = document.getElementById('teacher-password-repeat');
-            teacherPasswordRepeat.setAttribute('required', 'required');
-            teacherPasswordRepeat.setAttribute('data-bouncer-password-match', '#teacher-password');
-
-            document.querySelector('#teacher-modal .uk-modal-title').innerHTML = 'Create Teacher';
-
-        }, false);
-
         tdt.on('close', function () {
             fv.validate(document.getElementById('teacher-birthday'));
         });
@@ -342,16 +323,16 @@
                     UIkit.notification("<span uk-icon='icon: check'></span> Successfully "+ (r.data.method == 'update' ? 'updated' : 'created') +" a teacher", 'success');
 
                     form.reset();
+                    UIkit.modal('#teacher-modal').hide();
 
                     setTimeout(function() {
-                        UIkit.modal('#teacher-modal').hide();
                         window.location.reload();
                     }, 500);
                 }
             }).catch(function (error) {
-                if (error.response && error.response.status == 422) {
-                    UIkit.notification("<span uk-icon='icon: warning'></span> Failed processing teacher's data", "danger");
+                UIkit.notification("<span uk-icon='icon: warning'></span> Failed processing teacher's data", "danger");
 
+                if (error.response && error.response.status == 422) {
                     _.each(error.response.data.errors, function (v, i) {
                         var firstError = v[0];
                         
@@ -368,19 +349,36 @@
                             document.getElementById(i +'-exists').value = '';
 
                             // I know, it's st00pid.
+                        } else {
+                            fv.validate(document.querySelector('[name="'+ i +'"]'));
                         }
                     });
-                } else {
-                    // server timeout?
                 }
             });
         }, false);
 
-        var showTeacherButtons = document.querySelectorAll('[data-teacher-show]');
         var modifyTeacherButtons = document.querySelectorAll('[data-teacher-modify]');
         var deleteTeacherButtons = document.querySelectorAll('[data-teacher-delete]');
 
         var teacherForm = document.getElementById('teacher-form');
+
+        document.getElementById('add-teacher').addEventListener('click', function (evt) {
+            // @TODO Add a prompt if modal is open and there are input values in the field(s)
+
+            teacherForm.reset();
+
+            // Set action = to teacher.store
+            teacherForm.setAttribute('action', '<?php echo route('teachers.store') ?>');
+            teacherForm.removeSpoofMethod();
+
+            document.getElementById('teacher-password').setAttribute('required', 'required');
+            var teacherPasswordRepeat = document.getElementById('teacher-password-repeat');
+            teacherPasswordRepeat.setAttribute('required', 'required');
+            teacherPasswordRepeat.setAttribute('data-bouncer-password-match', '#teacher-password');
+
+            document.querySelector('#teacher-modal .uk-modal-title').innerHTML = 'Create Teacher';
+
+        }, false);
 
         _.each(modifyTeacherButtons, function (e) {
             e.addEventListener('click', function (evt) {
@@ -391,48 +389,16 @@
 
                 document.querySelector('#teacher-modal .uk-modal-title').innerHTML = 'Update Teacher Details';
 
-                var teacherIdField = document.getElementById('hidden-teacher-id');
-
                 document.getElementById('teacher-password').removeAttribute('required');
                 var teacherPasswordRepeat = document.getElementById('teacher-password-repeat');
                 teacherPasswordRepeat.removeAttribute('required');
                 teacherPasswordRepeat.removeAttribute('data-bouncer-password-match');
 
-                // If teacher id hidden field DOES NOT exists
-                if (!teacherIdField) {
-                    // Create input hidden element, with teacher id value
-                    var e = document.createElement('input');
-                    e.id = 'hidden-teacher-id';
-                    e.name = 'id';
-                    e.type = 'hidden';
-                    e.value = teacherId;
-
-                    teacherForm.appendChild(e);
-                } else {
-                    // Otherwise, just update the value
-                    teacherIdField.name = 'id';
-                    teacherIdField.value = teacherId;
-                }
-
-                // Add the method spoofer for PUT request
-                var methodSpoof = document.getElementById('hidden-method-spoof');
-
-                if (!methodSpoof) {
-                    var e = document.createElement('input');
-                    e.id = 'hidden-method-spoof';
-                    e.name = "_method";
-                    e.type = 'hidden';
-                    e.value = 'PUT';
-
-                    teacherForm.appendChild(e);
-                } else {
-                    methodSpoof.name = '_method';
-                    methodSpoof.value = 'PUT';
-                }
+                teacherForm.setSpoofMethod('PUT');
 
                 UIkit.modal('#teacher-modal').show();
 
-                formAjax.get('<?php echo route('teachers.index') ?>/'+ teacherId, serialize(teacherForm)).then(function (r) {
+                formAjax.get('<?php echo route('teachers.index') ?>/'+ teacherId).then(function (r) {
                     _.each(r.data, function (value, key) {
                         var field = document.querySelector('[name="'+ key +'"]');
                         var _value = value;

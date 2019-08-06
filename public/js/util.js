@@ -37,12 +37,67 @@ var serialize = function (form) {
 
 function formElementsDisable(formSelector, disabled) {
 	disabled = typeof disabled == 'undefined' ? true : disabled;
-	var form = document.querySelector(formSelector);
+	var form = formSelector.toString() == "[object HTMLFormElement]" ? formSelector : document.querySelector(formSelector);
 
 	if (!form) return;
-
 	var allElements = form.elements;
 	for (var i = 0, l = allElements.length; i < l; ++i) {
 		allElements[i].disabled = disabled;
 	}
 }
+
+// --- START Spoof Methods ---
+// Not working on <IE7. But fuck that, who still uses that garbage?
+/**
+ * Adds a hidden _method field to spoof HTTP verb
+ * @param method string The HTTP verb. PUT, PATCH, DELETE
+ */
+Element.prototype.setSpoofMethod = function (method) {
+	method = method.toUpperCase();
+
+	var h = this.querySelector('[name="_method"]');
+
+	if (!h) {
+		var e = document.createElement('input');
+		e.setAttribute('type', 'hidden');
+		e.setAttribute('name', '_method');
+		e.value = method;
+
+		this.appendChild(e);
+
+		h = e;
+	}
+
+	h.setAttribute('type', 'hidden');
+	h.value = method;
+};
+
+/**
+ * Removes _hidden method field for HTTB verb spoofing
+ */
+Element.prototype.removeSpoofMethod = function () {
+	var h = this.querySelector('[name="_method"]');
+
+	if (h) h.parentNode.removeChild(h);
+};
+
+Element.prototype.getSpoofMethod = function () {
+	var h = this.querySelector('[name="_method"]');
+
+	if (h) return h.value;
+
+	var m = this.getAttribute('method');
+
+	if (m) return m;
+
+	return 'GET';
+};
+// --- END Spoof Methods --
+
+Element.prototype.disableAllFields = function () {
+	formElementsDisable(this);
+};
+
+Element.prototype.enableAllFields = function () {
+	formElementsDisable(this, false);
+};
