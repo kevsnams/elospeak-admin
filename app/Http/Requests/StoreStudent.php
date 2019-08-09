@@ -16,6 +16,28 @@ class StoreStudent extends FormRequest
         return true;
     }
 
+    public function withValidator($validator)
+    {
+        $validator->after(function ($validator) {
+            if ($this->checkScheduleDaysValue()) {
+                $validator->errors()->add('schedule_days', 'One of the preferred days has an incorrect value');
+            }
+        });
+    }
+
+    private function checkScheduleDaysValue()
+    {
+        $allowed = ['M', 'T', 'W', 'Th', 'F', 'S'];
+        $hasError = false;
+        foreach ($this->input('schedule_days') as $day) {
+            if (!in_array($day, $allowed)) {
+                $hasError = true;
+            }
+        }
+
+        return $hasError;
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *
@@ -43,6 +65,19 @@ class StoreStudent extends FormRequest
                     'birthday' => [
                         'required',
                         'date_format:d F Y'
+                    ],
+                    'schedule_days' => 'required|array',
+                    'schedule_start' => [
+                        'required',
+                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
+                    ],
+                    'schedule_end' => [
+                        'required',
+                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
+                    ],
+                    'schedule_start_date' => [
+                        'required',
+                        'date_format:d F Y'
                     ]
                 ];
             }
@@ -58,6 +93,19 @@ class StoreStudent extends FormRequest
                     'personal_contact_number' => 'required|numeric',
                     'skype' => 'required|max:30',
                     'birthday' => [
+                        'required',
+                        'date_format:d F Y'
+                    ],
+                    'schedule_days' => 'required|array',
+                    'schedule_start' => [
+                        'required',
+                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
+                    ],
+                    'schedule_end' => [
+                        'required',
+                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
+                    ],
+                    'schedule_start_date' => [
                         'required',
                         'date_format:d F Y'
                     ]

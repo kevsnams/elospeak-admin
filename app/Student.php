@@ -7,6 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 class Student extends Model
 {
     public $hidden = ['password'];
+    public $append = ['age'];
+
+    public function classroomSchedulePreference()
+    {
+        return $this->hasOne('App\ClassroomSchedulePreference');
+    }
 
     public function getFullNameAttribute($value)
     {
