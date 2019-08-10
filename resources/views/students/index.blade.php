@@ -35,7 +35,9 @@
                 <tr>
                     <td class="cursor-hand" uk-toggle="target: #student-show-<?php echo $student->id ?>"><?php echo $student->username ?></td>
                     <td class="cursor-hand" uk-toggle="target: #student-show-<?php echo $student->id ?>"><?php echo $student->full_name ?></td>
-                    <td class="cursor-hand" uk-toggle="target: #student-show-<?php echo $student->id ?>"><?php echo $student->skype ?></td>
+                    <td>
+                        <a href="skype:<?php echo $student->skype ?>?chat"><?php echo $student->skype ?></a>
+                    </td>
                     <td>
                         <ul class="uk-iconnav">
                             <li><a href="javascript:;" data-student-modify="<?php echo $student->id ?>"><span uk-icon="icon: file-edit"></span> Modify</a></li>
@@ -63,17 +65,17 @@
                             <div class="uk-width-1-3">
                                 <dl class="uk-description-list">
                                     <dt>Skype</dt>
-                                    <dd><?php echo $student->skype ?></dd>
+                                    <dd><a href="skype:<?php echo $student->skype ?>?chat"><?php echo $student->skype ?></a></dd>
 
                                     <dt>Birthday</dt>
-                                    <dd><?php echo date('j F Y', strtotime($student->birthday)) ?></dd>
+                                    <dd>{{ $student->birthday_human }}</dd>
 
                                     <dt>Age</dt>
                                     <dd><?php echo $student->age ?></dd>
                                 </dl>
                             </div>
                             <div class="uk-width-1-3">
-                                <!-- PROFILE PICTURE HERE -->
+                                <a href="<?php echo route('students.show', ['id' => $student->id]) ?>" class="uk-button uk-button-primary">View Full Profile</a>
                             </div>
                         </div>
                     </td>
@@ -297,7 +299,7 @@
 
         var tdtScheduleStartDate = tail.DateTime("#schedule-start-date", {
             timeFormat: false,
-            today: true,
+            today: false,
             weekStart: 1,
             position: "top",
             dateFormat: "d F YYYY",
@@ -434,6 +436,8 @@
 
             document.getElementById('student-password').setAttribute('required', 'required');
             document.getElementById('student-password-repeat').setAttribute('required', 'required');
+
+            document.getElementById('schedule-days-not-empty').value = '';
         }, false);
 
         var formAjax = axios.create();
@@ -468,7 +472,7 @@
                     UIkit.modal(studentModal).hide();
 
                     setTimeout(function () {
-                        window.location.reload();
+                        window.location.href = url('/students/'+ r.data.id);
                     }, 500);
                 }
             }).catch(function (error) {
@@ -514,6 +518,8 @@
                 document.getElementById('student-password').removeAttribute('required');
                 document.getElementById('student-password-repeat').removeAttribute('required');
 
+                document.getElementById('schedule-days-not-empty').value = 'true';
+
                 UIkit.modal(studentModal).show();
 
                 formAjax.get(url('/students/'+ id)).then(function (r) {
@@ -533,7 +539,7 @@
 
                                 document.getElementById('schedule-start-time').value = htmlAttr.schedule_start_time;
                                 document.getElementById('schedule-end-time').value = htmlAttr.schedule_end_time;
-                                document.getElementById('schedule-start-date').value = moment(htmlAttr.start_date).format('DD MMMM YYYY');
+                                document.getElementById('schedule-start-date').value = moment(htmlAttr.schedule_date).format('DD MMMM YYYY');
                             }
 
                             if (field) field.value = _v;

@@ -17,3 +17,7 @@ Route::get('/', 'HomeController@index')->name('home');
 Route::resource('teachers', 'TeachersController');
 Route::resource('students', 'StudentsController');
 Route::resource('classrooms', 'ClassroomsController');
+
+Route::name('student.')->group(function () {
+    Route::post('/student/add-balance/', 'StudentsController@addBalance')->name('add-balance');
+});

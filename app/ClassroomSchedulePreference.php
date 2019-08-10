@@ -11,7 +11,7 @@ class ClassroomSchedulePreference extends Model
     ];
 
     public $appends = [
-        'html_attr'
+        'html_attr', 'start_date_human', 'lz_start_time', 'lz_end_time'
     ];
 
     public function student()
@@ -36,6 +36,11 @@ class ClassroomSchedulePreference extends Model
             'schedule_end_time' => $this->lz_end_time,
             'schedule_date' => $this->start_date
         ];
+    }
+
+    public function getStartDateHumanAttribute()
+    {
+        return date('j F Y', strtotime($this->start_date));
     }
 
     /** [START] All the get Leading Zero attributes of this model */

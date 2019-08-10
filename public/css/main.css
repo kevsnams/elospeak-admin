@@ -67,3 +67,9 @@ input[type=number]::-webkit-outer-spin-button {
 .cursor-hand {
     cursor: pointer;
 }
+
+.student-balance {
+    display: block;
+    font-size: 2.5em;
+    text-align: center;
+}

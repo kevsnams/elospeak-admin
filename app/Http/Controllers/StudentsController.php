@@ -51,9 +51,9 @@ class StudentsController extends Controller
     {
         $input = $request->validated();
 
-        DB::transaction(function () use($input) {
-            $student = new Student;
+        $student = new Student;
 
+        DB::transaction(function () use($input, $student) {
             $student->username = $input['username'];
             $student->password = Hash::make($input['password']);
             $student->full_name = ucwords($input['full_name']);
@@ -64,14 +64,13 @@ class StudentsController extends Controller
 
             $student->save();
 
-            $schedulePreference = $this->buildPrefSchedDaysInput($input);
-            
-            $classroomSchedulePreference = new ClassroomSchedulePreference();
-            $student->classroomSchedulePreference()->create($schedulePreference);
+            $classroomSchedulePreference = new ClassroomSchedulePreference;
+            $student->classroomSchedulePreference()->create($this->buildPrefSchedDaysInput($input));
         });
 
         return response()->json([
-            'success' => true
+            'success' => true,
+            'id' => $student->id
         ]);
     }
 
@@ -83,13 +82,12 @@ class StudentsController extends Controller
      */
     public function show(Request $request, $id)
     {
-        if ($request->isAjax()) {
-            $student = Student::with('classroomSchedulePreference')->find($id);
-
+        if ($request->ajax()) {
+            $student = Student::with('classroomSchedulePreference')->findOrFail($id);
             return response()->json($student);
         }
 
-        $student = Student::find($id);
+        $student = Student::with('classroomSchedulePreference', 'transactions')->findOrFail($id);
 
         return view('students.show', [
             'student' => $student
@@ -117,10 +115,10 @@ class StudentsController extends Controller
     public function update(StoreStudentRequest $request, $id)
     {
         $input = $request->validated();
-        
-        DB::transaction(function () use ($input) {
-            $student = Student::find($id);
 
+        $student = Student::findOrFail($id);
+
+        DB::transaction(function () use ($input, $student, $id) {
             $student->username = $input['username'];
 
             if (isset($input['password']) && !empty($input['password'])) {
@@ -135,14 +133,14 @@ class StudentsController extends Controller
 
             $student->save();
 
-            $schedulePreference = $this->buildPrefSchedDaysInput($input);
-
-            $classroomSchedulePreference = ClassSchedulePreference::where('user_id', $student->id)->first();
-            $classroomSchedulePreference->save($schedulePreference);
+            $classroomSchedulePreference = ClassroomSchedulePreference::where('student_id', $student->id)->first();
+            $classroomSchedulePreference->fill($this->buildPrefSchedDaysInput($input));
+            $classroomSchedulePreference->save();
         });
 
         return response()->json([
-            'success' => true
+            'success' => true,
+            'id' => $student->id
         ]);
     }
 
@@ -164,6 +162,27 @@ class StudentsController extends Controller
         return redirect(route('students.index'))->with('statusDelete', 'Successfully Deleted Student');
     }
 
+    public function addBalance(Request $request)
+    {
+        $input = $request->validate([
+            'id' => 'required|integer',
+            'balance_amount_whole' => 'required|numeric',
+            'balance_amount_decimal' => 'required|numeric'
+        ]);
+
+        $student = Student::findOrFail($input['id']);
+        
+        $amount = floatval($input['balance_amount_whole'] .'.'. $input['balance_amount_decimal']);
+        $transaction = new \App\StudentTransaction;
+        $transaction->amount = $amount;
+        $transaction->description = 'Added '. number_format($amount, 2) .' KRW by Admin';
+        $transaction->student_id = $student->id;
+
+        $transaction->save();
+
+        return redirect(route('students.show', ['id' => $student->id]))->with('balanceSuccess', 'Successfully added '. number_format($transaction->amount, 2) .' KRW');
+    }
+
     private function buildPrefSchedDaysInput($input)
     {
         $daysToTable = [
@@ -176,10 +195,8 @@ class StudentsController extends Controller
         ];
 
         $columnValue = [];
-        foreach ($input['schedule_days'] as $day) {
-            if (isset($daysToTable[$day])) {
-                $columnValue[$daysToTable[$day]] = 1;
-            }
+        foreach ($daysToTable as $code => $day) {
+            $columnValue[$day] = in_array($code, $input['schedule_days']) ? 1 : 0;
         }
 
         $prefTimeStart = array_map('intval', explode(':', $input['schedule_start_time']));
