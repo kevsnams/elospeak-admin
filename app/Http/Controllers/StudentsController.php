@@ -81,11 +81,19 @@ class StudentsController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
-        $student = Student::with('classroomSchedulePreference')->find($id);
+        if ($request->isAjax()) {
+            $student = Student::with('classroomSchedulePreference')->find($id);
 
-        return response()->json($student);
+            return response()->json($student);
+        }
+
+        $student = Student::find($id);
+
+        return view('students.show', [
+            'student' => $student
+        ]);
     }
 
     /**
@@ -174,8 +182,8 @@ class StudentsController extends Controller
             }
         }
 
-        $prefTimeStart = array_map('intval', explode(':', $input['schedule_start']));
-        $prefTimeEnd = array_map('intval', explode(':', $input['schedule_end']));
+        $prefTimeStart = array_map('intval', explode(':', $input['schedule_start_time']));
+        $prefTimeEnd = array_map('intval', explode(':', $input['schedule_end_time']));
         
         
         $columnValue['start_hour'] = $prefTimeStart[0];
