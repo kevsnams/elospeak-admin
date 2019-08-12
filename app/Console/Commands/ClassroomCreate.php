@@ -17,8 +17,6 @@ class ClassroomCreate extends Command
         {studentId : The student_id of the user you wish to create classrooms}
         {prefStartHour : The student\'s preferred start time in hour}
         {prefStartMinute : The student\'s preferred start time in minute}
-        {prefEndHour : The student\'s preferred end time in hour}
-        {prefEndMinute : The student\'s preferred end time in minute}
         {startDate : The date where to start the classrooms}
         {howMany? : [Optional] How many classrooms to create. If left blank, it will create classrooms depending on how much balance the student has}';
 

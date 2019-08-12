@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Student extends Model
 {
     public $hidden = ['password'];
-    public $append = ['age'];
+    public $append = ['age', 'balance', 'birthday_human', 'has_classrooms'];
 
     public function classroomSchedulePreference()
     {
@@ -17,6 +17,16 @@ class Student extends Model
     public function transactions()
     {
         return $this->hasMany('App\StudentTransaction');
+    }
+
+    public function classrooms()
+    {
+        return $this->hasMany('App\Classroom');
+    }
+
+    public function getHasClassroomsAttribute()
+    {
+        return $this->transactions()->count() > 0;
     }
 
     public function getBalanceAttribute()

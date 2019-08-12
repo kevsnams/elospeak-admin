@@ -13,6 +13,11 @@ class Teacher extends Model
         'password'
     ];
 
+    public function classrooms()
+    {
+        return $this->hasMany('App\Classroom');
+    }
+
     public static function getEducationalAttainmentValues()
     {
         return [

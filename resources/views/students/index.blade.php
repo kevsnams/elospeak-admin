@@ -40,6 +40,7 @@
                     </td>
                     <td>
                         <ul class="uk-iconnav">
+                            <li><a href="{{ route('students.show', ['id' => $student->id]) }}"><span uk-icon="icon: user"></span> View Profile</a></li>
                             <li><a href="javascript:;" data-student-modify="<?php echo $student->id ?>"><span uk-icon="icon: file-edit"></span> Modify</a></li>
                             <li><a href="javascript:;" data-student-delete="<?php echo $student->id ?>"><span uk-icon="icon: trash"></span> Delete</a></li>
                         </ul>
@@ -221,16 +222,6 @@
                         </div>
                         <div class="uk-width-1-3">
                             <div class="uk-padding-small">
-                                <label class="uk-form-label" for="schedule-end-time">End Time <span class="field-required">*</span></label>
-                                <div class="uk-form-controls">
-                                    <input type="text" class="uk-input" data-bouncer-target="#error-schedule-end-time" autocomplete="off" required id="schedule-end-time" name="schedule_end_time">
-                                </div>
-                                <div id="error-schedule-end-time"></div>
-                            </div>
-                        </div>
-
-                        <div class="uk-width-1-1">
-                            <div class="uk-padding-small uk-width-medium">
                                 <label class="uk-form-label" for="schedule-start-date">Start Date <span class="field-required">*</span></label>
                                 <div class="uk-form-controls">
                                     <input type="text" class="uk-input" data-bouncer-target="#error-schedule-start-date" autocomplete="off" required id="schedule-start-date" name="schedule_start_date">
@@ -284,17 +275,6 @@
             timeHours: 0,
             timeMinutes: 0,
             timeFormat: 'HH:ss'
-        });
-
-        var tdtScheduleEndTime = tail.DateTime("#schedule-end-time", {
-            dateFormat: false,
-            time12h: true,
-            position: "top",
-            closeButton: false,
-            timeSeconds: false,
-            timeHours: 0,
-            timeMinutes: 0,
-            timeFormat: 'HH:ii'
         });
 
         var tdtScheduleStartDate = tail.DateTime("#schedule-start-date", {
@@ -405,9 +385,6 @@
 
         tdtScheduleStartTime.on('close', tdtValidate('schedule-start-time'));
         tdtScheduleStartTime.on('change', tdtValidate('schedule-start-time'));
-
-        tdtScheduleEndTime.on('close', tdtValidate('schedule-end-time'));
-        tdtScheduleEndTime.on('change', tdtValidate('schedule-end-time'));
 
         tdtScheduleStartDate.on('close', tdtValidate('schedule-start-date'));
         tdtScheduleStartDate.on('change', tdtValidate('schedule-start-date'));
@@ -538,7 +515,6 @@
                                 });
 
                                 document.getElementById('schedule-start-time').value = htmlAttr.schedule_start_time;
-                                document.getElementById('schedule-end-time').value = htmlAttr.schedule_end_time;
                                 document.getElementById('schedule-start-date').value = moment(htmlAttr.schedule_date).format('DD MMMM YYYY');
                             }
 

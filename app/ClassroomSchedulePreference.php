@@ -11,7 +11,7 @@ class ClassroomSchedulePreference extends Model
     ];
 
     public $appends = [
-        'html_attr', 'start_date_human', 'lz_start_time', 'lz_end_time'
+        'html_attr', 'start_date_human', 'lz_start_time'
     ];
 
     public function student()
@@ -33,7 +33,6 @@ class ClassroomSchedulePreference extends Model
         return [
             'schedule_days' => $scheduleDays,
             'schedule_start_time' => $this->lz_start_time,
-            'schedule_end_time' => $this->lz_end_time,
             'schedule_date' => $this->start_date
         ];
     }
@@ -49,11 +48,6 @@ class ClassroomSchedulePreference extends Model
         return $this->lz_start_hour .':'. $this->lz_start_minute;
     }
 
-    public function getLzEndTimeAttribute()
-    {
-        return $this->lz_end_hour .':'. $this->lz_end_minute;
-    }
-
     public function getLzStartHourAttribute()
     {
         return $this->start_hour <= 9 ? '0'. strval($this->start_hour) : strval($this->start_hour);
@@ -62,16 +56,6 @@ class ClassroomSchedulePreference extends Model
     public function getLzStartMinuteAttribute()
     {
         return $this->start_minute <= 9 ? '0'. strval($this->start_minute) : strval($this->start_minute);
-    }
-
-    public function getLzEndHourAttribute()
-    {
-        return $this->end_hour <= 9 ? '0'. strval($this->end_hour) : strval($this->end_hour);
-    }
-
-    public function getLzEndMinuteAttribute()
-    {
-        return $this->end_minute <= 9 ? '0'. strval($this->end_minute) : strval($this->end_minute);
     }
     /** [END] */
 }

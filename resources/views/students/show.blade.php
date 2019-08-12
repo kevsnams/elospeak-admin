@@ -2,17 +2,17 @@
 @section('pageTitle', 'Student | '. $student->full_name)
 
 @section('pageHeader')
-    <span class="uk-text-large">Student | {{ $student->full_name }}</span>
+    <span class="uk-text-large">Student &raquo; {{ $student->full_name }}</span>
 @endsection
 
 @section('content')
     <div class="uk-margin">
-        <ul class="uk-tab" uk-tab="connect: #student-tabs">
+        <ul class="uk-tab" uk-switcher="connect: #student-tabs">
             <li><a href="#" class="uk-active">Overview</a></li>
             <li><a href="#">Transactions</a></li>
         </ul>
     </div>
-    <div id="student-tabs" class="uk-switcher">
+    <div id="student-tabs" class="uk-switcher" uk-switcher>
         <div class="uk-grid" uk-grid uk-tab-item="0">
             <div class="uk-width-2-3">
                 <div class="uk-padding-small">
@@ -29,6 +29,13 @@
                             {{ session('balanceSuccess') }}
                         </div>
                     @endif
+
+                    <div class="uk-alert-warning" uk-alert>
+                        <a class="uk-alert-close" uk-close></a>
+                        <h3>Unallocated Classrooms Detected</h3>
+                        <p>Click the button below to create classrooms based on how much balance the student has. This usually happens on a fresh account. After this process, classrooms will be created automatically after the student renewed their subscription</p>
+                        <button class="uk-button uk-button-primary">Create Classrooms</button>
+                    </div>
 
                     <!-- a class="uk-align-right">Edit</a -->
                     <p class="uk-text-lead uk-margin-remove-top">Personal Information</p>
@@ -75,21 +82,14 @@
                     <!-- a class="uk-align-right">Edit</a -->
                     <p class="uk-text-lead">Schedule Preferences</p>
                     <div class="uk-flex">
-                        <div class="uk-width-1-3">
+                        <div class="uk-width-1-2">
                             <dl class="uk-description-list">
                                 <dt>Start Time</dt>
                                 <dd>{{ $student->classroomSchedulePreference->lz_start_time }}</dd>
                             </dl>
                         </div>
 
-                        <div class="uk-width-1-3">
-                            <dl class="uk-description-list">
-                                <dt>End Time</dt>
-                                <dd>{{ $student->classroomSchedulePreference->lz_end_time }}</dd>
-                            </dl>
-                        </div>
-
-                        <div class="uk-width-1-3">
+                        <div class="uk-width-1-2">
                             <dl class="uk-description-list">
                                 <dt>Start Date</dt>
                                 <dd>{{ $student->classroomSchedulePreference->start_date_human }}</dd>
@@ -103,8 +103,10 @@
                     <span class="uk-text-lead">Balance</span>
                     <span class="student-balance uk-margin-small-bottom">{{ number_format($student->balance, 2) }} KRW</span>
                     <button class="uk-button uk-button-primary uk-width-1-1" href="#balance-modal" uk-toggle>Add Balance</button>
+
                     <hr>
-                    <button class="uk-button uk-button-default uk-width-1-1">View Classrooms</button>
+
+                    <button class="uk-button uk-button-default uk-width-1-1 uk-margin-small-bottom"><span uk-icon="tv"></span> View Classrooms</button>
                 </div>
             </div>
         </div>

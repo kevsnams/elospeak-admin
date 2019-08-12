@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title>LEGO &#8212; @yield('pageTitle')</title>
+    <title>{{ config('app.name') }} &#8212; @yield('pageTitle')</title>
 
     <link href="https://fonts.googleapis.com/css?family=Nunito:200,400,700i,900i&display=swap" rel="stylesheet">
 
@@ -20,21 +20,18 @@
         <div class="uk-grid-collapse" uk-grid>
             <div class="uk-width-1-6" id="content-left">
                 <div class="home-button-wrapper">
-                    <a href="<?php echo url('/') ?>" class="home-button">LEGO &#8212; Admin</a>
+                    <a href="<?php echo url('/') ?>" class="home-button">{{ config('app.name') }} &#8212; Admin</a>
                 </div>
 
                 <div class="left-nav-wrapper">
                     <ul class="uk-nav uk-nav-default left-nav">
                         <li class="uk-nav-header">Class</li>
-                        <li><a href="<?php echo url('teachers') ?>">Teachers</a></li>
-                        <li><a href="<?php echo url('students') ?>">Students</a></li>
-                        <li><a href="<?php echo url('classrooms') ?>">Classrooms</a></li>
+                        <li><a href="<?php echo route('teachers.index') ?>">Teachers</a></li>
+                        <li><a href="<?php echo route('students.index') ?>">Students</a></li>
+                        <li><a href="<?php echo route('classrooms.index') ?>">Classrooms</a></li>
                         <li class="uk-nav-divider"></li>
                         <li class="uk-nav-header">Configurations</li>
-                        <li><a href="#">Admin</a></li>
-                        <li><a href="#">Payments</a></li>
-                        <li><a href="#">Salaries</a></li>
-                        <li><a href="#">Other Website Settings</a></li>
+                        <li><a href="<?php echo route('settings.index') ?>">Website Settings</a></li>
                         <li class="uk-nav-divider"></li>
                         <li>
                             <a href="#" id="logout-button" title="Logout"><span uk-icon="icon: sign-out;"></span> Logout</a>

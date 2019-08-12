@@ -200,13 +200,9 @@ class StudentsController extends Controller
         }
 
         $prefTimeStart = array_map('intval', explode(':', $input['schedule_start_time']));
-        $prefTimeEnd = array_map('intval', explode(':', $input['schedule_end_time']));
-        
         
         $columnValue['start_hour'] = $prefTimeStart[0];
         $columnValue['start_minute'] = $prefTimeStart[1];
-        $columnValue['end_hour'] = $prefTimeEnd[0];
-        $columnValue['end_minute'] = $prefTimeEnd[1];
 
         $columnValue['start_date'] = date('Y-m-d', strtotime($input['schedule_start_date']));
 

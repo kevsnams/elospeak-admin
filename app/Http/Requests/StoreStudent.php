@@ -71,10 +71,6 @@ class StoreStudent extends FormRequest
                         'required',
                         'regex:/[0-9][0-9]\:[0-9][0-9]/'
                     ],
-                    'schedule_end_time' => [
-                        'required',
-                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
-                    ],
                     'schedule_start_date' => [
                         'required',
                         'date_format:d F Y'
@@ -98,10 +94,6 @@ class StoreStudent extends FormRequest
                     ],
                     'schedule_days' => 'required|array',
                     'schedule_start_time' => [
-                        'required',
-                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
-                    ],
-                    'schedule_end_time' => [
                         'required',
                         'regex:/[0-9][0-9]\:[0-9][0-9]/'
                     ],

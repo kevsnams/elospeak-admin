@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>LEGO Admin &#8212; Login</title>
+    <title>{{ config('app.name') }} Admin &#8212; Login</title>
 
     <link href="https://fonts.googleapis.com/css?family=Nunito:200,400,700i,900i&display=swap" rel="stylesheet">
 
@@ -19,6 +19,14 @@
                 <div class="login-box uk-margin-top uk-border-rounded uk-box-shadow-medium">
                     <form action="<?php echo route('login') ?>" method="POST">
                         @csrf
+
+                        @if ($errors->isNotEmpty())
+                            <div class="uk-alert-danger" uk-alert>
+                                <a class="uk-alert-close" uk-close></a>
+                                <p>Incorrect Username or Password</p>
+                            </div>
+                        @endif
+
                         <div class="uk-margin">
                             <div class="uk-inline">
                                 <span class="uk-form-icon" uk-icon="icon: user"></span>
