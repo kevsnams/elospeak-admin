@@ -10,6 +10,8 @@ class Classroom extends Model
     const STATUS_DONE = 2;
     const STATUS_CANCELLED = 3;
 
+    const CREATE_MAX_PER_MONTH = 20;
+
     public static function statusArray()
     {
         return [

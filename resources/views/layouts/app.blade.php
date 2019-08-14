@@ -9,7 +9,7 @@
 
     <link href="https://fonts.googleapis.com/css?family=Nunito:200,400,700i,900i&display=swap" rel="stylesheet">
 
-    <link href="<?php echo url('/uikit-3.1.6/css/uikit.min.css') ?>" rel="stylesheet">
+    <link href="<?php echo url('/uikit-3.1.7/css/uikit.min.css') ?>" rel="stylesheet">
     <link href="<?php echo url('/css/main.css') ?>" rel="stylesheet">
 
     @yield('pageCSS')
@@ -59,8 +59,8 @@
     </form>
 
     <script src="<?php echo url('/js/underscore-1.9.1.min.js') ?>"></script>
-    <script src="<?php echo url('/uikit-3.1.6/js/uikit.min.js') ?>"></script>
-    <script src="<?php echo url('/uikit-3.1.6/js/uikit-icons.min.js') ?>"></script>
+    <script src="<?php echo url('/uikit-3.1.7/js/uikit.min.js') ?>"></script>
+    <script src="<?php echo url('/uikit-3.1.7/js/uikit-icons.min.js') ?>"></script>
     <script src="<?php echo url('/js/moment-2.24.0.min.js') ?>"></script>
     <script src="<?php echo url('/js/axios.min.js') ?>"></script>
     <script src="<?php echo url('/js/util.js') ?>"></script>

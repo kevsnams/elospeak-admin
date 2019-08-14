@@ -12,8 +12,8 @@
             <li><a href="#">Transactions</a></li>
         </ul>
     </div>
-    <div id="student-tabs" class="uk-switcher" uk-switcher>
-        <div class="uk-grid" uk-grid uk-tab-item="0">
+    <div id="student-tabs" class="uk-switcher">
+        <div class="uk-grid student-tab" uk-grid>
             <div class="uk-width-2-3">
                 <div class="uk-padding-small">
                     @if ($errors->has('balance_amount_whole') || $errors->has('balance_amount_decimal'))
@@ -29,13 +29,13 @@
                             {{ session('balanceSuccess') }}
                         </div>
                     @endif
-
-                    <div class="uk-alert-warning" uk-alert>
-                        <a class="uk-alert-close" uk-close></a>
-                        <h3>Unallocated Classrooms Detected</h3>
-                        <p>Click the button below to create classrooms based on how much balance the student has. This usually happens on a fresh account. After this process, classrooms will be created automatically after the student renewed their subscription</p>
-                        <button class="uk-button uk-button-primary">Create Classrooms</button>
-                    </div>
+                    
+                    @if ($student->classrooms->isEmpty())
+                        <div class="uk-alert-warning" uk-alert>
+                            <h3>Empty Classrooms Detected</h3>
+                            <p>The student doesn't have any classrooms yet. Create classrooms using the form on the right side of this page.</p>
+                        </div>
+                    @endif
 
                     <!-- a class="uk-align-right">Edit</a -->
                     <p class="uk-text-lead uk-margin-remove-top">Personal Information</p>
@@ -88,13 +88,14 @@
                                 <dd>{{ $student->classroomSchedulePreference->lz_start_time }}</dd>
                             </dl>
                         </div>
-
-                        <div class="uk-width-1-2">
-                            <dl class="uk-description-list">
-                                <dt>Start Date</dt>
-                                <dd>{{ $student->classroomSchedulePreference->start_date_human }}</dd>
-                            </dl>
-                        </div>
+                        @if ($student->classrooms->isEmpty())
+                            <div class="uk-width-1-2">
+                                <dl class="uk-description-list">
+                                    <dt>Start Date</dt>
+                                    <dd>{{ $student->classroomSchedulePreference->start_date_human }}</dd>
+                                </dl>
+                            </div>
+                        @endif
                     </div>
                 </div>
             </div>
@@ -107,11 +108,49 @@
                     <hr>
 
                     <button class="uk-button uk-button-default uk-width-1-1 uk-margin-small-bottom"><span uk-icon="tv"></span> View Classrooms</button>
+
+                    <div class="uk-card uk-card-body uk-card-default">
+                        <h3 class="uk-card-title">Create Classrooms</h3>
+                        <form method="POST" action="{{ route('classrooms.store') }}">
+                            @csrf
+                            <input type="hidden" name="classroom[student_id]" value="{{ $student->id }}">
+                            <div class="uk-flex">
+                                <div class="uk-width-auto">
+                                    <label>Quantity</label><br>
+                                    <input type="number" class="uk-input show-controls" value="{{ $classroomMaxCreate }}" min="1" max="{{ $classroomMaxCreate }}" name="classroom[quantity]" style="width: 75px">
+                                </div>
+                                <div class="uk-width-expand">
+                                    <div style="padding-top: 25px; padding-left: 20px;">
+                                        <label>
+                                            <input type="checkbox" id="a" uk-toggle="target: #create-classroom-schedule; animation: uk-animation-slide-top-medium;" name="classroom[use_schedule_preferences]" class="uk-checkbox" checked>
+                                            <small>Use Schedule Preferences</small>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+            
+                            <div id="create-classroom-schedule" class="uk-margin-top" hidden>
+                                <hr>
+                                <div class="uk-flex">
+                                    <div class="uk-margin-medium-right">
+                                        <input class="uk-input" style="width: 120px" type="text" id="create-classroom-start-time" name="classroom[start_time]" placeholder="Start Time">
+                                    </div>
+                                    <div>
+                                        <input class="uk-input" style="width: 120px" type="text" id="create-classroom-start-date" name="classroom[start_date]" placeholder="Start Date">
+                                    </div>
+                                </div>
+                            </div>
+            
+                            <div class="uk-margin-top">
+                                <button type="submit" class="uk-button uk-button-primary">Create</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div class="uk-grid uk-margin-small-top" uk-grid uk-tab-item="1">
+        <div class="uk-grid uk-margin-small-top student-tab" uk-grid>
             <div class="uk-width-1-1">
                 <div class="uk-padding-small">
                     <span class="uk-text-lead">History</span><br>
@@ -169,4 +208,42 @@
             </form>
         </div>
     </div>
+@endsection
+
+@section('pageCSS')
+    <link href="<?php echo url('/tail.DateTime-0.4.14/css/tail.datetime-default-blue.min.css') ?>" rel="stylesheet">
+@endsection
+
+@section('pageJavascript')
+    <script src="<?php echo url('/tail.DateTime-0.4.14/js/tail.datetime.min.js') ?>"></script>
+
+    <script>
+        window.addEventListener('DOMContentLoaded', function (event) {
+            var tdtCreateClassroomStartTime = tail.DateTime("#create-classroom-start-time", {
+                dateFormat: false,
+                time12h: true,
+                position: "top",
+                closeButton: false,
+                timeSeconds: false,
+                timeHours: 0,
+                timeMinutes: 0,
+                timeFormat: 'HH:ss'
+            });
+
+            var tdtCreateClassroomStartDate = tail.DateTime("#create-classroom-start-date", {
+                timeFormat: false,
+                today: false,
+                weekStart: 1,
+                position: "left",
+                dateFormat: "d F YYYY",
+                closeButton: false,
+                dateStart: new Date(),
+                dateRanges: [
+                    {
+                        days: ["SUN"]
+                    }
+                ]
+            });
+        });
+    </script>
 @endsection

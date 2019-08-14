@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Student;
 use App\ClassroomSchedulePreference;
+use App\Classroom;
 
 use App\Http\Requests\StoreStudent as StoreStudentRequest;
 
@@ -87,10 +88,11 @@ class StudentsController extends Controller
             return response()->json($student);
         }
 
-        $student = Student::with('classroomSchedulePreference', 'transactions')->findOrFail($id);
+        $student = Student::with('classrooms', 'classroomSchedulePreference', 'transactions')->findOrFail($id);
 
         return view('students.show', [
-            'student' => $student
+            'student' => $student,
+            'classroomMaxCreate' => Classroom::CREATE_MAX_PER_MONTH
         ]);
     }
 

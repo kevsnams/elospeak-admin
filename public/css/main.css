@@ -58,8 +58,8 @@ ul.left-nav li a:hover {
     font-weight: 900;
 }
 
-input[type=number]::-webkit-inner-spin-button, 
-input[type=number]::-webkit-outer-spin-button { 
+input[type=number]::-webkit-inner-spin-button:not(.show-controls), 
+input[type=number]::-webkit-outer-spin-button:not(.show-controls) { 
     -webkit-appearance: none; 
     margin: 0; 
 }
