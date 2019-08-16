@@ -42,37 +42,9 @@ class StudentsController extends Controller
         //
     }
 
-    /**
-     * Store a newly created resource in storage.
-     *
-     * @param  App\Http\Requests\StoreStudent  $request
-     * @return \Illuminate\Http\Response
-     */
-    public function store(StoreStudentRequest $request)
+    public function store(Request $request)
     {
-        $input = $request->validated();
-
-        $student = new Student;
-
-        DB::transaction(function () use($input, $student) {
-            $student->username = $input['username'];
-            $student->password = Hash::make($input['password']);
-            $student->full_name = ucwords($input['full_name']);
-            $student->email = $input['email'];
-            $student->personal_contact_number = $input['personal_contact_number'];
-            $student->skype = $input['skype'];
-            $student->birthday = date('Y-m-d', strtotime($input['birthday']));
-
-            $student->save();
-
-            $classroomSchedulePreference = new ClassroomSchedulePreference;
-            $student->classroomSchedulePreference()->create($this->buildPrefSchedDaysInput($input));
-        });
-
-        return response()->json([
-            'success' => true,
-            'id' => $student->id
-        ]);
+        
     }
 
     /**
@@ -134,10 +106,6 @@ class StudentsController extends Controller
             $student->birthday = date('Y-m-d', strtotime($input['birthday']));
 
             $student->save();
-
-            $classroomSchedulePreference = ClassroomSchedulePreference::where('student_id', $student->id)->first();
-            $classroomSchedulePreference->fill($this->buildPrefSchedDaysInput($input));
-            $classroomSchedulePreference->save();
         });
 
         return response()->json([
@@ -162,52 +130,5 @@ class StudentsController extends Controller
         });
 
         return redirect(route('students.index'))->with('statusDelete', 'Successfully Deleted Student');
-    }
-
-    public function addBalance(Request $request)
-    {
-        $input = $request->validate([
-            'id' => 'required|integer',
-            'balance_amount_whole' => 'required|numeric',
-            'balance_amount_decimal' => 'required|numeric'
-        ]);
-
-        $student = Student::findOrFail($input['id']);
-        
-        $amount = floatval($input['balance_amount_whole'] .'.'. $input['balance_amount_decimal']);
-        $transaction = new \App\StudentTransaction;
-        $transaction->amount = $amount;
-        $transaction->description = 'Added '. number_format($amount, 2) .' KRW by Admin';
-        $transaction->student_id = $student->id;
-
-        $transaction->save();
-
-        return redirect(route('students.show', ['id' => $student->id]))->with('balanceSuccess', 'Successfully added '. number_format($transaction->amount, 2) .' KRW');
-    }
-
-    private function buildPrefSchedDaysInput($input)
-    {
-        $daysToTable = [
-            'M' => 'monday',
-            'T' => 'tuesday',
-            'W' => 'wednesday',
-            'Th' => 'thursday',
-            'F' => 'friday',
-            'S' => 'saturday'
-        ];
-
-        $columnValue = [];
-        foreach ($daysToTable as $code => $day) {
-            $columnValue[$day] = in_array($code, $input['schedule_days']) ? 1 : 0;
-        }
-
-        $prefTimeStart = array_map('intval', explode(':', $input['schedule_start_time']));
-        
-        $columnValue['start_hour'] = $prefTimeStart[0];
-        $columnValue['start_minute'] = $prefTimeStart[1];
-
-        $columnValue['start_date'] = date('Y-m-d', strtotime($input['schedule_start_date']));
-
-        return $columnValue;
     }
 }

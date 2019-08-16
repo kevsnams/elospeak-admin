@@ -42,6 +42,9 @@ function formElementsDisable(formSelector, disabled) {
 	if (!form) return;
 	var allElements = form.elements;
 	for (var i = 0, l = allElements.length; i < l; ++i) {
+		if (allElements[i].hasAttribute('data-skip-disable')) {
+			continue;
+		}
 		allElements[i].disabled = disabled;
 	}
 }

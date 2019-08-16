@@ -29,13 +29,6 @@
                             {{ session('balanceSuccess') }}
                         </div>
                     @endif
-                    
-                    @if ($student->classrooms->isEmpty())
-                        <div class="uk-alert-warning" uk-alert>
-                            <h3>Empty Classrooms Detected</h3>
-                            <p>The student doesn't have any classrooms yet. Create classrooms using the form on the right side of this page.</p>
-                        </div>
-                    @endif
 
                     <!-- a class="uk-align-right">Edit</a -->
                     <p class="uk-text-lead uk-margin-remove-top">Personal Information</p>
@@ -81,32 +74,10 @@
                     <hr>
                     <!-- a class="uk-align-right">Edit</a -->
                     <p class="uk-text-lead">Schedule Preferences</p>
-                    <div class="uk-flex">
-                        <div class="uk-width-1-2">
-                            <dl class="uk-description-list">
-                                <dt>Start Time</dt>
-                                <dd>{{ $student->classroomSchedulePreference->lz_start_time }}</dd>
-                            </dl>
-                        </div>
-                        @if ($student->classrooms->isEmpty())
-                            <div class="uk-width-1-2">
-                                <dl class="uk-description-list">
-                                    <dt>Start Date</dt>
-                                    <dd>{{ $student->classroomSchedulePreference->start_date_human }}</dd>
-                                </dl>
-                            </div>
-                        @endif
-                    </div>
                 </div>
             </div>
             <div class="uk-width-1-3">
                 <div class="uk-padding-small">
-                    <span class="uk-text-lead">Balance</span>
-                    <span class="student-balance uk-margin-small-bottom">{{ number_format($student->balance, 2) }} KRW</span>
-                    <button class="uk-button uk-button-primary uk-width-1-1" href="#balance-modal" uk-toggle>Add Balance</button>
-
-                    <hr>
-
                     <button class="uk-button uk-button-default uk-width-1-1 uk-margin-small-bottom"><span uk-icon="tv"></span> View Classrooms</button>
 
                     <div class="uk-card uk-card-body uk-card-default">

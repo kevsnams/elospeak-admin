@@ -35,9 +35,16 @@
             <hr>
 
             <div class="uk-margin">
-                <label class="uk-form-label" for="classroom-student-price">Price per class (in KRW) <span class="field-required">*</span></label>
+                <label class="uk-form-label" for="classroom-student-price">Price per Class (in KRW) <span class="field-required">*</span></label>
                 <div class="uk-form-controls">
                     <input class="uk-input uk-width-small" id="classroom-price-per-class" type="number" name="CLASSROOM[price_per_class]" value="{{ Arr::get($webSettings, 'CLASSROOM.price_per_class') }}" type="text">
+                </div>
+            </div>
+
+            <div class="uk-margin">
+                <label class="uk-form-label" for="classroom-student-price-weekend">Weekend Price Rate (in KRW) <span class="field-required">*</span></label>
+                <div class="uk-form-controls">
+                    <input class="uk-input uk-width-small" id="classroom-price-per-class" type="number" name="CLASSROOM[price_per_class_weekend]" value="{{ Arr::get($webSettings, 'CLASSROOM.price_per_class_weekend') }}" type="text">
                 </div>
             </div>
 

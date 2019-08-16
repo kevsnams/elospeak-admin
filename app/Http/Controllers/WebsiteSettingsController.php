@@ -6,7 +6,7 @@ use Illuminate\Http\Request;
 use App\WebsiteSetting;
 
 use Arr;
-class WebsiteSettings extends Controller
+class WebsiteSettingsController extends Controller
 {
     public function __construct()
     {
@@ -20,7 +20,7 @@ class WebsiteSettings extends Controller
             ->orWHere('key', 'LIKE', 'TEACHER.%')
             ->get();
 
-        $assocWebSettings = $this->parseWebsiteSettings($webSettings);
+        $assocWebSettings = parseWebSettings($webSettings);
 
         return view('website_settings.index', [
             'webSettings' => $assocWebSettings
@@ -32,6 +32,7 @@ class WebsiteSettings extends Controller
         $input = $request->validate([
             'CLASSROOM.price_per_class' => 'required|numeric',
             'CLASSROOM.duration' => 'required|integer',
+            'CLASSROOM.price_per_class_weekend' => 'required|numeric',
             'TEACHER.salary_per_class' => 'required|numeric'
         ]);
         
@@ -43,16 +44,5 @@ class WebsiteSettings extends Controller
         }
 
         return redirect(route('settings.index'))->with('saveSuccess', true);
-    }
-
-    private function parseWebsiteSettings($settings)
-    {
-        $builder = [];
-        foreach ($settings as $setting) {
-            $keys = explode('.', $setting->key);
-            $builder[$keys[0]][$keys[1]] = $setting->value;
-        }
-
-        return $builder;
     }
 }

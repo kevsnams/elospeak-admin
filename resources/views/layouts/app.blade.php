@@ -44,7 +44,8 @@
                     <div class="uk-text-left page-header">
                         @yield('pageHeader')
                     </div>
-                    <hr>
+
+                    <hr class="uk-margin-remove-top uk-margin-remove-bottom">
 
                     <div id="main-content">
                         @yield('content')

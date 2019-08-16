@@ -19,10 +19,16 @@ Route::resource('students', 'StudentsController');
 Route::resource('classrooms', 'ClassroomsController');
 
 Route::name('settings.')->group(function () {
-    Route::get('/settings', 'WebsiteSettings@index')->name('index');
-    Route::post('/settings', 'WebsiteSettings@save')->name('save');
+    Route::get('/settings', 'WebsiteSettingsController@index')->name('index');
+    Route::post('/settings', 'WebsiteSettingsController@save')->name('save');
 });
 
 Route::name('student.')->group(function () {
     Route::post('/student/add-balance/', 'StudentsController@addBalance')->name('add-balance');
+});
+
+Route::name('enroll.')->group(function() {
+    Route::get('/enroll', 'EnrollController@index')->name('index');
+    Route::post('/enroll', 'EnrollController@store')->name('store');
+    Route::post('/enroll/check-availability', 'EnrollController@checkAvailability')->name('check-availability');
 });

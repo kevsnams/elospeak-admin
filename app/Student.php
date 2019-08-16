@@ -24,16 +24,6 @@ class Student extends Model
         return $this->hasMany('App\Classroom');
     }
 
-    public function getHasClassroomsAttribute()
-    {
-        return $this->transactions()->count() > 0;
-    }
-
-    public function getBalanceAttribute()
-    {
-        return $this->transactions()->sum('amount');
-    }
-
     public function getFullNameAttribute($value)
     {
         return mb_convert_case($value, MB_CASE_TITLE);
