@@ -7,11 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 class ClassroomSchedulePreference extends Model
 {
     public $fillable = [
-        'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'start_hour', 'start_minute', 'end_hour', 'end_minute', 'start_date'
+        'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
     ];
 
     public $appends = [
-        'html_attr', 'start_date_human', 'lz_start_time'
+        'monday_array', 'tuesday_array', 'wednesday_array', 'thursday_array', 'friday_array', 'saturday_array', 'sunday_array'
     ];
 
     public function student()
@@ -19,43 +19,38 @@ class ClassroomSchedulePreference extends Model
         return $this->belongsTo('App\Student');
     }
 
-    public function getHtmlAttrAttribute()
+    public function getMondayArrayAttribute()
     {
-        $scheduleDays = [
-            'M' => (bool) $this->monday,
-            'T' => (bool) $this->tuesday,
-            'W' => (bool) $this->wednesday,
-            'Th' => (bool) $this->thursday,
-            'F' => (bool) $this->friday,
-            'S' => (bool) $this->saturday
-        ];
-
-        return [
-            'schedule_days' => $scheduleDays,
-            'schedule_start_time' => $this->lz_start_time,
-            'schedule_date' => $this->start_date
-        ];
+        return $this->monday ? json_decode($this->monday) : null;
     }
 
-    public function getStartDateHumanAttribute()
+    public function getTuesdayArrayAttribute()
     {
-        return date('j F Y', strtotime($this->start_date));
+        return $this->tuesday ? json_decode($this->tuesday) : null;
     }
 
-    /** [START] All the get Leading Zero attributes of this model */
-    public function getLzStartTimeAttribute()
+    public function getWednesdayArrayAttribute()
     {
-        return $this->lz_start_hour .':'. $this->lz_start_minute;
+        return $this->wednesday ? json_decode($this->wednesday) : null;
     }
 
-    public function getLzStartHourAttribute()
+    public function getThursdayArrayAttribute()
     {
-        return $this->start_hour <= 9 ? '0'. strval($this->start_hour) : strval($this->start_hour);
+        return $this->thursday ? json_decode($this->thursday) : null;
     }
 
-    public function getLzStartMinuteAttribute()
+    public function getFridayArrayAttribute()
     {
-        return $this->start_minute <= 9 ? '0'. strval($this->start_minute) : strval($this->start_minute);
+        return $this->friday ? json_decode($this->friday) : null;
     }
-    /** [END] */
+
+    public function getSaturdayArrayAttribute()
+    {
+        return $this->saturday ? json_decode($this->saturday) : null;
+    }
+
+    public function getSundayArrayAttribute()
+    {
+        return $this->sunday ? json_decode($this->sunday) : null;
+    }
 }

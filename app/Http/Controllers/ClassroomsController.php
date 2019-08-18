@@ -46,7 +46,7 @@ class ClassroomsController extends Controller
     {
         // Perform validation first
         $request->validate([
-            'classroom.quantity' => 'required|integer|min:1|max:'. Classroom::CREATE_MAX_PER_MONTH,
+            'classroom.quantity' => 'required|integer|min:1',
             'classroom.use_schedule_preference' => 'sometimes',
             'classroom.start_time' => [
                 'required_if:use_schedule_preference,on',

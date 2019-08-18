@@ -10,4 +10,8 @@ class StudentTransaction extends Model
     {
         return $this->belongsTo('App\Student');
     }
+    public function invoice()
+    {
+        return $this->belongsTo('App\Invoice');
+    }
 }

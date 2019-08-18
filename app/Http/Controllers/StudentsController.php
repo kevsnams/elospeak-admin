@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Student;
 use App\ClassroomSchedulePreference;
 use App\Classroom;
+use App\WebsiteSetting;
 
 use App\Http\Requests\StoreStudent as StoreStudentRequest;
 
@@ -55,12 +56,7 @@ class StudentsController extends Controller
      */
     public function show(Request $request, $id)
     {
-        if ($request->ajax()) {
-            $student = Student::with('classroomSchedulePreference')->findOrFail($id);
-            return response()->json($student);
-        }
-
-        $student = Student::with('classrooms', 'classroomSchedulePreference', 'transactions')->findOrFail($id);
+        $student = Student::with('classrooms', 'classroomSchedulePreference', 'transactions', 'transactions.invoice')->findOrFail($id);
 
         return view('students.show', [
             'student' => $student,
@@ -130,5 +126,22 @@ class StudentsController extends Controller
         });
 
         return redirect(route('students.index'))->with('statusDelete', 'Successfully Deleted Student');
+    }
+
+    public function classrooms(Request $request, $id)
+    {
+        $student = Student::findOrFail($id);
+        $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
+
+        $timeslots = createClassroomTimeSlots(
+            $webSettings['CLASSROOM']['start_hour'],
+            $webSettings['CLASSROOM']['end_hour'],
+            $webSettings['CLASSROOM']['duration']
+        );
+        
+        return view('students.classrooms', [
+            'student' => $student,
+            'timeslots' => $timeslots
+        ]);
     }
 }

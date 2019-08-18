@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="{{ asset('/uikit-3.1.7/css/uikit.min.css') }}">
     <style>
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: DejaVu Sans, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: rgba(0, 0, 0, .7);
             font-size: 0.8em;
         }
@@ -67,6 +67,11 @@
                                 <dt><strong>Student ID</strong></dt>
                                 <dd>{{ $student->id }}</dd>
                             </dl>
+
+                            <dl class="uk-description-list">
+                                <dt><strong>Billing Period</strong></dt>
+                                <dd>{{ $startDate->format('j F Y') }} &#8212; {{ $endDate->format('j F Y') }}</dd>
+                            </dl>
                         </div>
                     </td>
                 </tr>
@@ -83,49 +88,30 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach ($classes as $day => $timeSlots)
+                @foreach ($classes as $day => $info)
                     <tr>
-                        <td colspan="3">{{ ucfirst($day) }} class</td>
+                        <td colspan="3"><em>{{ $info['date'] }}</em> class</td>
                         <td>&nbsp;</td>
                     </tr>
 
-                    @foreach ($timeSlots as $timeSlot)
+                    @foreach ($info['slots'] as $slot)
                         <tr>
                             <td>
-                                <div class="uk-margin-medium-left">{{ $timeSlot[0]}} &#8212; {{ $timeSlot[1] }}</div>
+                                <div class="uk-margin-medium-left">{{ $slot['start']}} &#8212; {{ $slot['end'] }}</div>
                             </td>
                             <td>1</td>
-                            <td>
-                                @php
-                                    $price = 0;
-                                    if ($day == 'saturday' || $day == 'sunday'):
-                                        $price = $pricePerClassWeekend;
-                                    else:
-                                        $price = $pricePerClassWeekday;
-                                    endif;
-                                @endphp
-
-                                {{ $price }} KRW
-                            </td>
-                            <td>{{ $price }} KRW</td>
+                            <td>{{ $slot['price'] }} KRW</td>
+                            <td>{{ $slot['price'] }} KRW</td>
                         </tr>
                     @endforeach
                 @endforeach
                 
                 <tr>
                     <td class="uk-text-right" colspan="3">
-                        TOTAL WEEKLY
+                        TOTAL NUMBER OF CLASSES
                     </td>
                     <td>
-                        <strong>{{ $totalAmount }}</strong>
-                    </td>
-                </tr>
-                <tr>
-                    <td class="uk-text-right" colspan="3">
-                        TOTAL NUMBER OF WEEKS
-                    </td>
-                    <td>
-                        <strong>4</strong>
+                        <strong>{{ $totalClasses }}</strong>
                     </td>
                 </tr>
                 <tr>
@@ -133,7 +119,7 @@
                         TOTAL AMOUNT
                     </td>
                     <td>
-                        <strong>{{ $totalAmount * 4 }} KRW</strong>
+                        <strong>{{ number_format($totalAmount) }} KRW</strong>
                     </td>
                 </tr>
             </tbody>

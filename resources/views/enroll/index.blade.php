@@ -7,16 +7,15 @@
 
 @section('content')
 
-<div id="enroll-done-modal" class="uk-flex-top" uk-modal>
+<div id="enroll-done-modal" class="uk-flex-top" uk-modal='{"esc-close": false, "bg-close": false}'>
     <div class="uk-modal-dialog">
-        <button class="uk-modal-close-default" type="button" uk-close></button>
         <div class="uk-modal-body">
             <div class="uk-text-center">
                 <p class="uk-text-lead">Enrollment Finished</p>
                 <p>Student is now officially enrolled. Classrooms were already created based on the student's desired schedule.</p>
                 <hr>
-                <a class="uk-button uk-button-default uk-button-small">Download Invoice</a>
-                <a class="uk-button uk-button-default uk-button-small">View Student Profile</a>
+                <a id="after-enroll-invoice" class="uk-button uk-button-default uk-button-small">Download Invoice</a>
+                <a id="after-enroll-profile" class="uk-button uk-button-default uk-button-small">View Student Profile</a>
             </div>
         </div>
     </div>
@@ -244,7 +243,8 @@
 
         var tdtValidate = function(field) {
             return function () {
-                fv.validate('enrollment-'+ field);
+                var e = document.getElementById('enrollment-'+ field);
+                fv.validate(e);
             }
         };
 
@@ -330,7 +330,9 @@
                 if (r.status == 200 && r.data.success) {
                     formAjax.post(url('/enroll'), data).then(function (r) {
                         if (r.status == 200) {
-                            console.log(r.data);
+                            document.getElementById('after-enroll-invoice').setAttribute('href', url('/invoice/download/') +'?id='+ r.data.invoice_id);
+                            document.getElementById('after-enroll-profile').setAttribute('href', url('/students') +'/'+ r.data.student_id);
+                            UIkit.modal('#enroll-done-modal').show();
                         } else {
                             uikitNotif('danger');
                         }

@@ -74,12 +74,99 @@
                     <hr>
                     <!-- a class="uk-align-right">Edit</a -->
                     <p class="uk-text-lead">Schedule Preferences</p>
+                    <table class="uk-table uk-table-hover uk-table-center">
+                        <thead>
+                            <tr>
+                                <th>Monday</th>
+                                <th>Tuesday</th>
+                                <th>Wednesday</th>
+                                <th>Thursday</th>
+                                <th>Friday</th>
+                                <th>Saturday</th>
+                                <th>Sunday</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    @if ($student->classroomSchedulePreference->monday)
+                                        @foreach ($student->classroomSchedulePreference->monday_array as $slots)
+                                            {!! implode(' &#8212; ', $slots) !!}<br>
+                                        @endforeach
+                                    @else
+                                        <div class="uk-text-center"><span uk-icon="close"></span></div>
+                                    @endif
+                                </td>
+
+                                <td>
+                                    @if ($student->classroomSchedulePreference->tuesday)
+                                        @foreach ($student->classroomSchedulePreference->tuesday_array as $slots)
+                                            {!! implode(' &#8212; ', $slots) !!}<br>
+                                        @endforeach
+                                    @else
+                                        <div class="uk-text-center"><span uk-icon="close"></span></div>
+                                    @endif
+                                </td>
+
+                                <td>
+                                    @if ($student->classroomSchedulePreference->wednesday)
+                                        @foreach ($student->classroomSchedulePreference->wednesday_array as $slots)
+                                            {!! implode(' &#8212; ', $slots) !!}<br>
+                                        @endforeach
+                                    @else
+                                        <div class="uk-text-center"><span uk-icon="close"></span></div>
+                                    @endif
+                                </td>
+
+                                <td>
+                                    @if ($student->classroomSchedulePreference->thursday)
+                                        @foreach ($student->classroomSchedulePreference->thursday_array as $slots)
+                                            {!! implode(' &#8212; ', $slots) !!}<br>
+                                        @endforeach
+                                    @else
+                                        <div class="uk-text-center"><span uk-icon="close"></span></div>
+                                    @endif
+                                </td>
+
+                                <td>
+                                    @if ($student->classroomSchedulePreference->friday)
+                                        @foreach ($student->classroomSchedulePreference->friday_array as $slots)
+                                            {!! implode(' &#8212; ', $slots) !!}<br>
+                                        @endforeach
+                                    @else
+                                        <div class="uk-text-center"><span uk-icon="close"></span></div>
+                                    @endif
+                                </td>
+
+                                <td>
+                                    @if ($student->classroomSchedulePreference->saturday)
+                                        @foreach ($student->classroomSchedulePreference->saturday_array as $slots)
+                                            {!! implode(' &#8212; ', $slots) !!}<br>
+                                        @endforeach
+                                    @else
+                                        <div class="uk-text-center"><span uk-icon="close"></span></div>
+                                    @endif
+                                </td>
+
+                                <td>
+                                    @if ($student->classroomSchedulePreference->sunday)
+                                        @foreach ($student->classroomSchedulePreference->sunday_array as $slots)
+                                            {!! implode(' &#8212; ', $slots) !!}<br>
+                                        @endforeach
+                                    @else
+                                        <div class="uk-text-center"><span uk-icon="close"></span></div>
+                                    @endif
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
             <div class="uk-width-1-3">
                 <div class="uk-padding-small">
-                    <button class="uk-button uk-button-default uk-width-1-1 uk-margin-small-bottom"><span uk-icon="tv"></span> View Classrooms</button>
-
+                    <a href="{{ route('student.classrooms', ['id' => $student->id]) }}" class="uk-button uk-button-default uk-width-1-1 uk-margin-small-bottom"><span uk-icon="tv"></span> View Classrooms</a>
+                    
+                    <!--- 
                     <div class="uk-card uk-card-body uk-card-default">
                         <h3 class="uk-card-title">Create Classrooms</h3>
                         <form method="POST" action="{{ route('classrooms.store') }}">
@@ -117,6 +204,7 @@
                             </div>
                         </form>
                     </div>
+                    -->
                 </div>
             </div>
         </div>
@@ -131,6 +219,8 @@
                                 <th class="uk-table-shrink">ID</th>
                                 <th class="uk-table-expand">Description</th>
                                 <th class="uk-table-small">Amount</th>
+                                <th class="uk-table-small">Status</th>
+                                <th class="uk-table-small">Invoice</th>
                                 <th class="uk-table-small">Date</th>
                                 <th class="uk-table-small">Time</th>
                             </tr>
@@ -140,7 +230,11 @@
                                 <tr>
                                     <td>{{ $transaction->id }}</td>
                                     <td>{{ $transaction->description }}</td>
-                                    <td>{{ $transaction->amount }}</td>
+                                    <td>{{ number_format($transaction->amount) }} KRW</td>
+                                    <td>{{ $transaction->invoice->status_text }}</td>
+                                    <td>
+                                        <a href="{{ route('invoice.download') }}?id={{ $transaction->invoice->id }}">Invoice</a>
+                                    </td>
                                     <td>{{ date('F j, Y', strtotime($transaction->created_at)) }}</td>
                                     <td>{{ date('h:i A', strtotime($transaction->created_at)) }}</td>
                                 </tr>
@@ -149,34 +243,6 @@
                     </table>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <div id="balance-modal" class="uk-flex-top" uk-modal>
-        <div class="uk-modal-dialog uk-modal-body uk-margin-auto-vertical">
-            <button class="uk-modal-close-default" type="button" uk-close></button>
-            <span class="uk-text-lead">Add Balance</span>
-            <form method="POST" id="balance-form" action="{{ route('student.add-balance') }}">
-                @csrf
-                <input type="hidden" name="id" value="{{ $student->id }}">
-                <div class="uk-flex uk-flex-middle">
-                    <div class="uk-margin-small-right">
-                        <label for="balance-amount">Amount (KRW)</label>
-                    </div>
-                    <div class="uk-margin-small">
-                        <input class="uk-input uk-border-pill" style="width: 130px" id="balance-amount-whole" name="balance_amount_whole" type="number" required>
-                    </div>
-                    <div class="uk-margin-small">
-                        <span style="font-weight: bold; display: block; padding: 10px;">.</span>
-                    </div>
-                    <div class="uk-margin-small">
-                        <input class="uk-input uk-border-pill" style="width: 50px" id="balance-amount-decimal" name="balance_amount_decimal" type="number" required value="00">
-                    </div>
-                    <div class="uk-margin-small uk-margin-medium-left">
-                        <button class="uk-button uk-button-primary" type="submit">Add</button>
-                    </div>
-                </div>
-            </form>
         </div>
     </div>
 @endsection

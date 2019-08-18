@@ -17,7 +17,7 @@ class CreateInvoicesTable extends Migration
             $table->bigIncrements('id');
             $table->string('pdf_path', 500);
             $table->unsignedBigInteger('student_id');
-            $table->unsignedBigInteger('transaction_id');
+            $table->unsignedBigInteger('student_transaction_id');
             $table->timestamps();
         });
     }

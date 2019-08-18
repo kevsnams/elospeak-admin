@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Migrations\Migration;
 
-class AddInvoiceColumnOnTransactionsTable extends Migration
+class AddInvoiceIdOnClassroomsTable extends Migration
 {
     /**
      * Run the migrations.
@@ -13,8 +13,8 @@ class AddInvoiceColumnOnTransactionsTable extends Migration
      */
     public function up()
     {
-        Schema::table('student_transactions', function (Blueprint $table) {
-            $table->unsignedBigInteger('invoice_id')->after('student_id')->nullable()->default(null);
+        Schema::table('classrooms', function (Blueprint $table) {
+            $table->unsignedBigInteger('invoice_id')->after('price');
         });
     }
 
@@ -25,7 +25,7 @@ class AddInvoiceColumnOnTransactionsTable extends Migration
      */
     public function down()
     {
-        Schema::table('student_transactions', function (Blueprint $table) {
+        Schema::table('classrooms', function (Blueprint $table) {
             $table->dropColumn('invoice_id');
         });
     }

@@ -1,0 +1,58 @@
+.dv-main {
+    background: rgba(201, 201, 201, 0.534);
+    padding: 10px;
+    overflow-x: scroll;
+}
+
+.dv-sidebar {
+    width: 120px;
+    background: rgba(255, 255, 255, 0.301);
+    position: absolute;
+    margin-top: 50px;
+}
+.dv-calendar {
+    margin-left: 120px;
+}
+.dv-calendar .dv-classes {
+    width: 150px;
+    display: inline-block;
+    background: #fff;
+    text-align: center;
+    border-top: 1px solid rgba(70, 70, 70, 0.28);
+}
+.dv-calendar .dv-classes:not(:last-child) {
+    border-right: 1px solid rgba(70, 70, 70, 0.28);
+}
+
+.dv-timeslot {
+    height: 100px;
+    display: table;
+    width: 100%;
+}
+.dv-timeslot:not(:last-child) {
+    border-bottom: 1px solid rgba(70, 70, 70, 0.28)
+}
+
+.dv-daysbar {
+    margin-left: 120px;
+}
+.dv-daysbar .dv-day {
+    width: 150px;
+    height: 37px;
+    display: inline-block;
+    text-align: center;
+    background: #fff;
+    padding-top: 13px;
+    font-weight: bold;
+}
+.dv-daysbar .dv-day:not(:last-child) {
+    border-right: 1px solid rgba(70, 70, 70, 0.28)
+}
+
+.dv-time {
+    text-align: center;
+    font-weight: bold;
+    
+    vertical-align:middle;
+    display: table-cell;
+}

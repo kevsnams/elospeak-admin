@@ -23,8 +23,9 @@
                     <a href="<?php echo url('/') ?>" class="home-button">{{ config('app.name') }} &#8212; Admin</a>
                 </div>
 
-                <div class="left-nav-wrapper">
+                <div class="left-nav-wrapper" uk-height-viewport="{'expand': true}">
                     <ul class="uk-nav uk-nav-default left-nav">
+                        <li><a href="<?php echo route('enroll.index') ?>">Enroll Student</a></li>
                         <li class="uk-nav-header">Class</li>
                         <li><a href="<?php echo route('teachers.index') ?>">Teachers</a></li>
                         <li><a href="<?php echo route('students.index') ?>">Students</a></li>

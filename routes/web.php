@@ -24,11 +24,15 @@ Route::name('settings.')->group(function () {
 });
 
 Route::name('student.')->group(function () {
-    Route::post('/student/add-balance/', 'StudentsController@addBalance')->name('add-balance');
+    Route::get('/student/classrooms/{id}', 'StudentsController@classrooms')->name('classrooms');
 });
 
 Route::name('enroll.')->group(function() {
     Route::get('/enroll', 'EnrollController@index')->name('index');
     Route::post('/enroll', 'EnrollController@store')->name('store');
     Route::post('/enroll/check-availability', 'EnrollController@checkAvailability')->name('check-availability');
+});
+
+Route::name('invoice.')->group(function() {
+    Route::get('/invoice/download', 'InvoiceController@download')->name('download');
 });

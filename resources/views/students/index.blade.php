@@ -6,8 +6,6 @@
 @endsection
 
 @section('content')
-<button class="uk-button uk-button-primary" id="add-student" uk-toggle="target: #student-modal"><span uk-icon="icon: plus"></span> Add Student</button>
-<hr>
 
 @if (session('statusDelete'))
     <div uk-alert class="uk-alert-success">
