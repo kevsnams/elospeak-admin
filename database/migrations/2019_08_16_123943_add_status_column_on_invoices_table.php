@@ -14,7 +14,7 @@ class AddStatusColumnOnInvoicesTable extends Migration
     public function up()
     {
         Schema::table('invoices', function (Blueprint $table) {
-            $table->unsignedTinyInteger('status')->default(0)->after('transaction_id');
+            $table->unsignedTinyInteger('status')->default(0)->after('student_transaction_id');
         });
     }
 
