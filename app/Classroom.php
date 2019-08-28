@@ -13,6 +13,8 @@ class Classroom extends Model
     const STATUS_DONE = 2;
     const STATUS_CANCELLED = 3;
 
+    const PAYMENT_NUM_WEEKS_CYCLE = 4;
+
     public $appends = ['start_raw', 'end_raw'];
 
     public static function statusArray()
