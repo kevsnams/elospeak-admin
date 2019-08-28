@@ -61,8 +61,7 @@ class StudentsController extends Controller
         $student = Student::with('classrooms', 'classroomSchedulePreference', 'transactions', 'transactions.invoice')->findOrFail($id);
 
         return view('students.show', [
-            'student' => $student,
-            'classroomMaxCreate' => Classroom::CREATE_MAX_PER_MONTH
+            'student' => $student
         ]);
     }
 

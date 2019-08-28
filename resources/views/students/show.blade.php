@@ -164,47 +164,9 @@
             </div>
             <div class="uk-width-1-3">
                 <div class="uk-padding-small">
-                    <a href="{{ route('student.classrooms', ['id' => $student->id]) }}" class="uk-button uk-button-default uk-width-1-1 uk-margin-small-bottom"><span uk-icon="tv"></span> View Classrooms</a>
-                    
-                    <!--- 
-                    <div class="uk-card uk-card-body uk-card-default">
-                        <h3 class="uk-card-title">Create Classrooms</h3>
-                        <form method="POST" action="{{ route('classrooms.store') }}">
-                            @csrf
-                            <input type="hidden" name="classroom[student_id]" value="{{ $student->id }}">
-                            <div class="uk-flex">
-                                <div class="uk-width-auto">
-                                    <label>Quantity</label><br>
-                                    <input type="number" class="uk-input show-controls" value="{{ $classroomMaxCreate }}" min="1" max="{{ $classroomMaxCreate }}" name="classroom[quantity]" style="width: 75px">
-                                </div>
-                                <div class="uk-width-expand">
-                                    <div style="padding-top: 25px; padding-left: 20px;">
-                                        <label>
-                                            <input type="checkbox" id="a" uk-toggle="target: #create-classroom-schedule; animation: uk-animation-slide-top-medium;" name="classroom[use_schedule_preferences]" class="uk-checkbox" checked>
-                                            <small>Use Schedule Preferences</small>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-            
-                            <div id="create-classroom-schedule" class="uk-margin-top" hidden>
-                                <hr>
-                                <div class="uk-flex">
-                                    <div class="uk-margin-medium-right">
-                                        <input class="uk-input" style="width: 120px" type="text" id="create-classroom-start-time" name="classroom[start_time]" placeholder="Start Time">
-                                    </div>
-                                    <div>
-                                        <input class="uk-input" style="width: 120px" type="text" id="create-classroom-start-date" name="classroom[start_date]" placeholder="Start Date">
-                                    </div>
-                                </div>
-                            </div>
-            
-                            <div class="uk-margin-top">
-                                <button type="submit" class="uk-button uk-button-primary">Create</button>
-                            </div>
-                        </form>
-                    </div>
-                    -->
+                    <a href="{{ route('student.classrooms', ['id' => $student->id]) }}" class="uk-button uk-button-default uk-width-1-1 uk-margin-small-bottom">
+                        <span uk-icon="tv"></span> View Classrooms
+                    </a>
                 </div>
             </div>
         </div>
@@ -253,34 +215,4 @@
 
 @section('pageJavascript')
     <script src="<?php echo url('/tail.DateTime-0.4.14/js/tail.datetime.min.js') ?>"></script>
-
-    <script>
-        window.addEventListener('DOMContentLoaded', function (event) {
-            var tdtCreateClassroomStartTime = tail.DateTime("#create-classroom-start-time", {
-                dateFormat: false,
-                time12h: true,
-                position: "top",
-                closeButton: false,
-                timeSeconds: false,
-                timeHours: 0,
-                timeMinutes: 0,
-                timeFormat: 'HH:ss'
-            });
-
-            var tdtCreateClassroomStartDate = tail.DateTime("#create-classroom-start-date", {
-                timeFormat: false,
-                today: false,
-                weekStart: 1,
-                position: "left",
-                dateFormat: "d F YYYY",
-                closeButton: false,
-                dateStart: new Date(),
-                dateRanges: [
-                    {
-                        days: ["SUN"]
-                    }
-                ]
-            });
-        });
-    </script>
 @endsection
