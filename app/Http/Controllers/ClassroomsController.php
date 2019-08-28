@@ -2,10 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Classroom;
 use App\ClassroomSchedulePreference;
 use App\Student;
+use App\Teacher;
+use App\WebsiteSetting;
+
+use Illuminate\Http\Request;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Validation\Rule;
 
 class ClassroomsController extends Controller
 {
@@ -44,36 +50,7 @@ class ClassroomsController extends Controller
      */
     public function store(Request $request)
     {
-        // Perform validation first
-        $request->validate([
-            'classroom.quantity' => 'required|integer|min:1',
-            'classroom.use_schedule_preference' => 'sometimes',
-            'classroom.start_time' => [
-                'required_if:use_schedule_preference,on',
-                'regex:/[0-9][0-9]\:[0-9][0-9]/'
-            ],
-            'classroom.start_date' => 'required_if:use_schedule_preference,on|date_format:d F Y',
-            'classroom.student_id' => 'required|exists:students,id'
-        ]);
-
-        $student = Student::findOrFail($request->input('classroom.student_id'));
-        $quantity = $request->input('classroom.quantity', 1);
-        $useSchedulePreference = $request->input('classroom.use_schedule_preferences') ? true : false;
-        
-        // Determine what to use as datetime string
-        $startDateTimeString = '';
-
-        // If the user wants to use the student's schedule preference
-        if ($useSchedulePreference) {
-            // Then fetch from database, and use it.
-            $schedulePreference = ClassroomSchedulePreference::where('student_id', $student->id)->first();
-            $startDateTimeString = $schedulePreference->start_date .' '. $schedulePreference->start_hour .':'. $schedulePreference->start_minute;
-        } else {
-            // Otherwise, just use the input
-            $startDateTimeString = $request->input('classroom.start_date') .' '. $request->input('classroom.start_time');
-        }
-
-        $startDateTime = new Carbon($startDateTimeString);
+        // Check enrollment controller
     }
 
     /**
@@ -82,9 +59,13 @@ class ClassroomsController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
-        //
+        if ($request->ajax()) {
+            $classroom = Classroom::with('teacher')->findOrFail($id);
+
+            return response()->json($classroom->toArray());
+        }
     }
 
     /**
@@ -107,7 +88,35 @@ class ClassroomsController extends Controller
      */
     public function update(Request $request, $id)
     {
-        //
+        $request->validate([
+            'teacher_id' => 'sometimes|exists:teachers,id',
+            'classroom_id' => 'required|exists:classrooms,id',
+            'timeslot' => [
+                'required',
+                'regex:/[0-9][0-9]\:[0-9][0-9]|[0-9][0-9]\:[0-9][0-9]/'
+            ],
+            'date' => 'required|date_format:Y-n-j',
+            'status' => 'required|in:'. implode(',', array_keys(Classroom::statusArray()))
+        ]);
+
+        $timeslots = explode('|', $request->input('timeslot'));
+        
+        $start = new Carbon($request->input('date') .' '. $timeslots[0]);
+        $end = new Carbon($request->input('date') .' '. $timeslots[1]);
+
+        $classroom = Classroom::findOrFail($request->input('classroom_id'));
+
+        if ($request->input('teacher_id')) {
+            $classroom->teacher_id = (int) $request->input('teacher_id');
+        }
+
+        $classroom->start = $start->format('Y-m-d H:i:s');
+        $classroom->end = $end->format('Y-m-d H:i:s');
+        $classroom->status = (int) $request->input('status');
+
+        $classroom->save();
+
+        return response()->json(['success' => true]);
     }
 
     /**
@@ -119,5 +128,63 @@ class ClassroomsController extends Controller
     public function destroy($id)
     {
         //
+    }
+
+    public function timeslots(Request $request)
+    {
+        $studentId = $request->input('student_id');
+        $date = $request->input('date');
+
+        $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
+        $timeslots = createClassroomTimeSlots(
+            $webSettings['CLASSROOM']['start_hour'],
+            $webSettings['CLASSROOM']['end_hour'],
+            $webSettings['CLASSROOM']['duration']
+        );
+
+        $filledClassrooms = Classroom::where('student_id', $studentId)->whereRaw('DATE(start) = ?', [$date])->get();
+
+        $foundKeys = [];
+        foreach ($filledClassrooms as $classroom) {
+            $foundKeys[] = array_search(date('H:i', strtotime($classroom->start)), array_column($timeslots, 0));
+        }
+
+        $availableSlots = array_values(
+            array_filter($timeslots, function ($key) use ($foundKeys) {
+                return !in_array($key, array_keys($foundKeys));
+            }, ARRAY_FILTER_USE_KEY)
+        );
+
+        return response()->json($availableSlots);
+    }
+
+    public function teachers(Request $request)
+    {
+        $classroomId = $request->input('classroom_id');
+        $search = trim($request->input('query'));
+
+        $classroom = Classroom::with('teacher')->findOrFail($classroomId);
+        $teachers = Teacher::where(function ($query) use ($search, $classroom) {
+            $query->where('id', '<>', $classroom->teacher_id);
+            if (strlen($search)) {
+                $query->where(function($searchQuery) use ($search) {
+                    $searchQuery->where('id', $search)
+                        ->orWhere('full_name', 'LIKE', $search .'%')
+                        ->orWhere('username', 'LIKE', $search .'%');
+                });
+            }
+        })->whereDoesntHave('classrooms', function (Builder $query) use ($classroom) {
+            $query->where('teacher_id', '<>', $classroom->teacher_id)
+                ->where('start', '<>', $classroom->start)
+                ->where('end', '<>', $classroom->end);
+        })->orWhereHas('classrooms', function (Builder $query) use ($classroom) {
+            $query->where('teacher_id', '<>', $classroom->teacher_id)
+                ->where('start', '<>', $classroom->start)
+                ->where('end', '<>', $classroom->end);
+        })->get();
+
+        return response()->json([
+            'availableTeachers' => $teachers->toArray()
+        ]);
     }
 }

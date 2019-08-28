@@ -25,11 +25,12 @@
 
                 <div class="left-nav-wrapper" uk-height-viewport="{'expand': true}">
                     <ul class="uk-nav uk-nav-default left-nav">
+                            <li><a href="<?php echo url('/') ?>">Home</a></li>
                         <li><a href="<?php echo route('enroll.index') ?>">Enroll Student</a></li>
-                        <li class="uk-nav-header">Class</li>
+                        <li class="uk-nav-divider"></li>
+                        <li class="uk-nav-header">Users</li>
                         <li><a href="<?php echo route('teachers.index') ?>">Teachers</a></li>
                         <li><a href="<?php echo route('students.index') ?>">Students</a></li>
-                        <li><a href="<?php echo route('classrooms.index') ?>">Classrooms</a></li>
                         <li class="uk-nav-divider"></li>
                         <li class="uk-nav-header">Configurations</li>
                         <li><a href="<?php echo route('settings.index') ?>">Website Settings</a></li>
@@ -47,6 +48,8 @@
                     </div>
 
                     <hr class="uk-margin-remove-top uk-margin-remove-bottom">
+                    
+                    @yield('pageBreadcrumbs')
 
                     <div id="main-content">
                         @yield('content')

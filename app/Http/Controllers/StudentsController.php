@@ -13,6 +13,8 @@ use App\Http\Requests\StoreStudent as StoreStudentRequest;
 use Hash;
 use DB;
 
+use Carbon\Carbon;
+
 class StudentsController extends Controller
 {
     public function __construct()
@@ -128,20 +130,99 @@ class StudentsController extends Controller
         return redirect(route('students.index'))->with('statusDelete', 'Successfully Deleted Student');
     }
 
-    public function classrooms(Request $request, $id)
+    public function classrooms(Request $request, $id, $view = 'weekly', $date = null)
     {
         $student = Student::findOrFail($id);
-        $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
 
-        $timeslots = createClassroomTimeSlots(
-            $webSettings['CLASSROOM']['start_hour'],
-            $webSettings['CLASSROOM']['end_hour'],
-            $webSettings['CLASSROOM']['duration']
-        );
+        $startOfMonth = null;
+        $endOfMonth = null;
         
+        $now = new Carbon();
+
+        $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        $sidebar = [];
+
+        $isFilter = false;
+        $filterYear = null;
+        $filterMonth = null;
+        $dateDay = null;
+
+        // Ensure $view will only be 'weekly', 'today' & 'monthly'
+        switch ($view) {
+            case 'date':
+                $view = 'date';
+                break;
+            case 'monthly':
+                $view = 'monthly';
+                
+                $filterMonth = $request->input('filter_month');
+                $filterYear = $request->input('filter_year');
+
+                $isFilter = !is_null($filterMonth) && !is_null($filterYear);
+                $filterCarbon = $isFilter ? Carbon::createFromDate($filterYear, ($filterMonth + 1), 1) : $now;
+
+                $startOfMonth = new Carbon($filterCarbon->startOfMonth());
+                $endOfMonth = new Carbon($filterCarbon->endOfMonth());
+                break;
+            case 'weekly':
+            default:
+                $view = 'weekly';
+                break;
+        }
+
+        $classrooms = [];
+
+        if ($view == 'weekly') {
+            foreach ($days as $index => $day) {
+                $classrooms[$day] = Classroom::whereRaw('WEEKDAY(`start`) = ?', [$index])
+                    ->where(function ($query) use ($now) {
+                        $query->where('start', '>', $now->startOfWeek()->format('Y-m-d H:i:s'))
+                            ->where('end', '<', $now->endOfWeek()->format('Y-m-d H:i:s'));
+                    })->where('student_id', $student->id)->get();
+            }
+        }
+
+        if ($view == 'monthly') {
+            $rows = Classroom::where('start', '>', $startOfMonth->format('Y-m-d H:i:s'))
+                ->where('end', '<', $endOfMonth->format('Y-m-d H:i:s'))
+                ->where('student_id', $student->id)->get();
+            
+            foreach ($rows as $row) {
+                $classrooms[$row->start->format('Ymd')][] = $row;
+            }
+        }
+
+        if ($view == 'date') {
+            $dateDay = new Carbon($date);
+            $classrooms = Classroom::where('student_id', $id)
+                ->whereRaw('DATE(`start`) = ?', [$dateDay->format('Y-m-d')])->get();
+        }
+
+        $firstClassroom = Classroom::orderBy('start', 'ASC')->first();
+        $lastClassroom = Classroom::orderBy('end', 'DESC')->first();
+
+        $filterYears = [];
+        for ($i = (int) $firstClassroom->start->format('Y'); $i <= (int) $lastClassroom->end->format('Y'); $i++) {
+            $filterYears[] = $i;
+        }
+
+        $filterMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
         return view('students.classrooms', [
+            'now' => $now,
+            'view' => $view,
+            'days' => $days,
             'student' => $student,
-            'timeslots' => $timeslots
+            'classroomStatus' => Classroom::statusArray(),
+            'startOfMonth' => $startOfMonth,
+            'endOfMonth' => $endOfMonth,
+            'classrooms' => $classrooms,
+            'filterYears' => $filterYears,
+            'filterYear' => $filterYear,
+            'filterMonths' => $filterMonths,
+            'filterMonth' => $filterMonth,
+            'isFilter' => $isFilter,
+            'dateDay' => $dateDay
         ]);
     }
 }

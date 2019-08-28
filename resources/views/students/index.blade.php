@@ -5,6 +5,21 @@
     <span class="uk-text-large">Students</span>
 @endsection
 
+@section('pageBreadcrumbs')
+    @include('includes.breadcrumbs', [
+        'trails' => [
+            [
+                'text' => 'Home',
+                'href' => url('/')
+            ],
+            [
+                'text' => 'Students',
+                'is_active' => true
+            ]
+        ]
+    ])
+@endsection
+
 @section('content')
 
 @if (session('statusDelete'))

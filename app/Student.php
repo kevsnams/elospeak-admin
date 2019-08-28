@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Student extends Model
 {
     public $hidden = ['password'];
-    public $append = ['age', 'balance', 'birthday_human', 'has_classrooms'];
+    public $appends = ['age', 'balance', 'birthday_human', 'has_classrooms'];
 
     public function classroomSchedulePreference()
     {

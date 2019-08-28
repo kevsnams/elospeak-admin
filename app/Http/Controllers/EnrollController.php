@@ -117,7 +117,7 @@ class EnrollController extends Controller
                     }
 
                     // Go to the next day
-                    $date->setTimeFrom($date->addDay());
+                    $date->setTimeFrom($date->addDay()->format('Y-m-d'));
                     continue;
                 }
 
@@ -143,8 +143,8 @@ class EnrollController extends Controller
                         'invoice_id' => $invoice->id,
                         'start' => date('Y-m-d H:i', strtotime($date->format('Y-m-d') .' '. $timeSlot[0])),
                         'end' => date('Y-m-d H:i', strtotime($date->format('Y-m-d') .' '. $timeSlot[1])),
-                        'created_at' =>  \Carbon\Carbon::now(),
-                        'updated_at' => \Carbon\Carbon::now()
+                        'created_at' => Carbon::now(),
+                        'updated_at' => Carbon::now()
                     ];
                 }
 
@@ -158,7 +158,7 @@ class EnrollController extends Controller
                 ];
 
                 // Go to the next day
-                $date->setTimeFrom($date->addDay());
+                $date->setTimeFrom($date->addDay()->format('Y-m-d'));
 
                 // If after all that shinanigans, if the day is sunday, then proceed to the next week
                 if ($date->dayOfWeek === Carbon::SUNDAY) {
