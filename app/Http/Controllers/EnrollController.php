@@ -18,6 +18,7 @@ use DB;
 use PDF;
 use Carbon\Carbon;
 
+
 class EnrollController extends Controller
 {
     public function __construct()
@@ -27,6 +28,11 @@ class EnrollController extends Controller
 
     public function index()
     {
+        $t = new \App\Elospeak\Timeslots(8, 22, 25);
+        $d = \App\Elospeak\Timeslots::getAvailable('2019-09-01');
+        dd($d->getSlots(), $d->flatten());
+        #dd($t->getSlots(), $t->flatten());
+
         $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
         $classroomTimeSlots = createClassroomTimeSlots(
             // Opens 7AM
