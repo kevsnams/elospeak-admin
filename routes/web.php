@@ -30,6 +30,7 @@ Route::name('settings.')->group(function () {
 
 Route::name('student.')->group(function () {
     Route::get('/student/classrooms/{id}/{view?}/{date?}', 'StudentsController@classrooms')->name('classrooms');
+    Route::get('/student/classrooms/add/{id}/', 'StudentsController@addClassroom')->name('add-classroom');
 });
 
 Route::name('enroll.')->group(function() {

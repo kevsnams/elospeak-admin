@@ -55,6 +55,13 @@
                 </div>
             </div>
 
+            <div class="uk-margin">
+                <label class="uk-form-label" for="classroom-offset">In-between breaks (in minutes) <span class="field-required">*</span></label>
+                <div class="uk-form-controls">
+                    <input class="uk-input uk-width-small" id="classroom-offset" type="number" name="CLASSROOM[offset]" value="{{ Arr::get($webSettings, 'CLASSROOM.offset') }}" type="text">
+                </div>
+            </div>
+
             <p class="uk-text-lead uk-margin-remove-top">Students</p>
             <hr>
 

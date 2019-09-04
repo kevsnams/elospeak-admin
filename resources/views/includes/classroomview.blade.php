@@ -3,10 +3,6 @@
 
     $header = [];
     $classroomsGridSize = 7;
-
-    if ($view == 'weekly') {
-        $header = $days;
-    }
     
     if ($view == 'date') {
         $header = ['Showing classrooms by date - '. $dateDay->format('j F Y')];
@@ -41,45 +37,6 @@
             </div>
         @endif
     {{-- [END] --}}
-
-    
-    {{---
-
-        [START] WEEKLY VIEW
-        
-    ---}}
-    @if ($view == 'weekly')
-        <div class="cv-classrooms cv-classrooms-{{ $view }} uk-flex uk-flex-center">
-            @foreach ($classrooms as $day => $rooms)
-                <div class="cv-classroom uk-width-1-7">
-                    @if ($rooms->isEmpty())
-                        <div class="cv-room">
-                            <div class="cv-class-empty">
-                                <span class="cv-empty">EMPTY</span>
-                            </div>
-                        </div>
-                    @else
-                        @foreach ($rooms as $room)
-                            <div class="cv-room">
-                                <div class="cv-class-active cursor-hand" data-classroom="{{ $room->id }}">
-                                    <span class="cv-date">{{ $room->start->format('F j, Y') }}</span>
-                                    <span class="cv-time">{{ $room->start->format('H:i') }} - {{ $room->end->format('H:i') }}</span>
-                                    <span class="cv-status-{{ strtolower($room->status_text) }}">{{ $room->status_text }}</span>
-                                </div>
-                            </div>
-                        @endforeach
-                    @endif
-                </div>
-            @endforeach
-        </div>
-    @endif
-    {{---
-        
-        [END] WEEKLY VIEW
-        
-    ---}}
-    
-
     
     {{---
 

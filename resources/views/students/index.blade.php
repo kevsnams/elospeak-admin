@@ -28,6 +28,10 @@
         {{ session('statusDelete') }}
     </div>
 @endif
+<form class="uk-search uk-search-default uk-width-large">
+    <span uk-search-icon></span>
+    <input class="uk-search-input" type="search" name="query" placeholder="Search...">
+</form>
 
 <table class="uk-table uk-table-divider uk-table-hover">
     <thead>

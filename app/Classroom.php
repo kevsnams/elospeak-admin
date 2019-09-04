@@ -14,6 +14,7 @@ class Classroom extends Model
     const STATUS_CANCELLED = 3;
 
     const PAYMENT_NUM_WEEKS_CYCLE = 4;
+    const PAYMENT_NUM_DAYS_CYCLE = 30;
 
     public $appends = ['start_raw', 'end_raw'];
 

@@ -11,13 +11,13 @@ use App\WebsiteSetting;
 use App\Invoice;
 use App\Classroom;
 
+use App\Elospeak\Timeslots;
 use App\Http\Requests\StoreEnrollment as StoreEnrollmentRequest;
 
 use Hash;
 use DB;
 use PDF;
 use Carbon\Carbon;
-
 
 class EnrollController extends Controller
 {
@@ -28,34 +28,17 @@ class EnrollController extends Controller
 
     public function index()
     {
-        $t = new \App\Elospeak\Timeslots(8, 22, 25);
-        $d = \App\Elospeak\Timeslots::getAvailable('2019-09-01');
-        dd($d->getSlots(), $d->flatten());
-        #dd($t->getSlots(), $t->flatten());
-
-        $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
-        $classroomTimeSlots = createClassroomTimeSlots(
-            // Opens 7AM
-            $webSettings['CLASSROOM']['start_hour'],
-
-            // Closes 11 PM
-            $webSettings['CLASSROOM']['end_hour'],
-
-            // Class duration
-            $webSettings['CLASSROOM']['duration']
-        );
+        $timeslots = new Timeslots();
 
         return view('enroll.index', [
-            'timeSlots' => $classroomTimeSlots
+            'timeSlots' => $timeslots->getSlots()
         ]);
     }
 
     public function store(StoreEnrollmentRequest $request) {
         $input = $request->validated();
 
-        // Get the website settings
-        // @TODO Probably select only what we want?
-        $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
+        $webSettings = parseWebSettings(WebsiteSetting::classrooms(['price_per_class_weekend', 'price_per_class'])->get());
         $studentId = null;
         $invoiceId = null;
 
@@ -112,64 +95,54 @@ class EnrollController extends Controller
             // @TODO Korean Format
             // $date->locale('ko_KR');
 
-            while ($week <= Classroom::PAYMENT_NUM_WEEKS_CYCLE) {
+            $timeslots = new Timeslots();
+
+            for ($iday = 1; $iday <= Classroom::PAYMENT_NUM_DAYS_CYCLE; $iday++) {
                 $day = $input['classroom_schedule_preference'][strtolower($date->englishDayOfWeek)] ?? null;
 
-                // If $startDate is not found on classroom_schedule_preference
+                // If $day is not on on classroom_schedule_preference
                 if (is_null($day)) {
-                    // If sunday, go to the next week
-                    if ($date->dayOfWeek === Carbon::SUNDAY) {
-                        $week += 1;
-                    }
-
                     // Go to the next day
                     $date->setTimeFrom($date->addDay()->format('Y-m-d'));
                     continue;
                 }
 
-                $timeSlots = revertClassroomTimeSlotsValues($day['slots']);
-                $slots = [];
+                $timeslots->setSlots($day['slots'], '|');
+                $classes = [];
 
-                foreach ($timeSlots as $timeSlot) {
+                foreach ($timeslots->getSlots() as $timeslot) {
                     $price = $date->isWeekend() ? $webSettings['CLASSROOM']['price_per_class_weekend'] : $webSettings['CLASSROOM']['price_per_class'];
 
-                    $slots[] = [
-                        'start' => $timeSlot[0],
-                        'end' => $timeSlot[1],
+                    $classes[] = [
+                        'start' => $timeslot[0],
+                        'end' => $timeslot[1],
                         'price' => $price
                     ];
 
                     $totalAmount += $price;
-                    $totalClasses += 1;
+                    $totalClasses++;
 
                     $classrooms[] = [
                         'student_id' => $student->id,
                         'status' => Classroom::STATUS_UNPAID,
                         'price' => $price,
                         'invoice_id' => $invoice->id,
-                        'start' => date('Y-m-d H:i', strtotime($date->format('Y-m-d') .' '. $timeSlot[0])),
-                        'end' => date('Y-m-d H:i', strtotime($date->format('Y-m-d') .' '. $timeSlot[1])),
-                        'created_at' => Carbon::now(),
-                        'updated_at' => Carbon::now()
+                        'start' => date('Y-m-d H:i', strtotime($date->format('Y-m-d') .' '. $timeslot[0])),
+                        'end' => date('Y-m-d H:i', strtotime($date->format('Y-m-d') .' '. $timeslot[1])),
+                        'created_at' => now(),
+                        'updated_at' => now()
                     ];
                 }
 
-                $classroomSchedulePreference->{strtolower($date->englishDayOfWeek)} = json_encode($timeSlots);
+                $classroomSchedulePreference->{strtolower($date->englishDayOfWeek)} = json_encode($timeslots->getSlots());
 
                 $pdfData[] = [
-                    // @TODO Korean fonts
-                    // 'date' => $date->isoFormat('Do MMMM'),
                     'date' => $date->format('l, F j, Y'),
-                    'slots' => $slots
+                    'slots' => $classes
                 ];
 
                 // Go to the next day
                 $date->setTimeFrom($date->addDay()->format('Y-m-d'));
-
-                // If after all that shinanigans, if the day is sunday, then proceed to the next week
-                if ($date->dayOfWeek === Carbon::SUNDAY) {
-                    $week += 1;
-                }
             }
 
             // Save classrooms

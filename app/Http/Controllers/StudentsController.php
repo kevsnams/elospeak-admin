@@ -27,9 +27,16 @@ class StudentsController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
+    public function index(Request $request)
     {
-        $students = Student::orderBy('full_name', 'ASC')->get();
+        $searchQuery = trim($request->input('query'));
+        $students = Student::orderBy('full_name', 'ASC')->where(function ($query) use ($searchQuery) {
+            if ($searchQuery) {
+                $query->where('full_name', 'LIKE', "$searchQuery%")
+                    ->orWhere('username', 'LIKE', "$searchQuery%");
+            }
+        })->get();
+
         return view('students.index', [
             'students' => $students
         ]);
@@ -146,12 +153,13 @@ class StudentsController extends Controller
         $filterMonth = null;
         $dateDay = null;
 
-        // Ensure $view will only be 'weekly', 'today' & 'monthly'
+        // Ensure $view will only be 'date' & 'monthly'
         switch ($view) {
             case 'date':
                 $view = 'date';
                 break;
             case 'monthly':
+            default:
                 $view = 'monthly';
                 
                 $filterMonth = $request->input('filter_month');
@@ -163,23 +171,9 @@ class StudentsController extends Controller
                 $startOfMonth = new Carbon($filterCarbon->startOfMonth());
                 $endOfMonth = new Carbon($filterCarbon->endOfMonth());
                 break;
-            case 'weekly':
-            default:
-                $view = 'weekly';
-                break;
         }
 
         $classrooms = [];
-
-        if ($view == 'weekly') {
-            foreach ($days as $index => $day) {
-                $classrooms[$day] = Classroom::whereRaw('WEEKDAY(`start`) = ?', [$index])
-                    ->where(function ($query) use ($now) {
-                        $query->where('start', '>', $now->startOfWeek()->format('Y-m-d H:i:s'))
-                            ->where('end', '<', $now->endOfWeek()->format('Y-m-d H:i:s'));
-                    })->where('student_id', $student->id)->get();
-            }
-        }
 
         if ($view == 'monthly') {
             $rows = Classroom::where('start', '>', $startOfMonth->format('Y-m-d H:i:s'))
@@ -222,6 +216,15 @@ class StudentsController extends Controller
             'filterMonth' => $filterMonth,
             'isFilter' => $isFilter,
             'dateDay' => $dateDay
+        ]);
+    }
+
+    public function addClassroom(Request $request, $id)
+    {
+        $student = Student::findOrFail($id);
+
+        return view('students.add_classroom', [
+            'student' => $student
         ]);
     }
 }

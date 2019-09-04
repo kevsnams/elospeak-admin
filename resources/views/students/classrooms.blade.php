@@ -2,7 +2,7 @@
 @section('pageTitle', 'Classrooms - '. $student->full_name)
 
 @section('pageHeader')
-    <span class="uk-text-large">Classrooms &raquo; {{ $student->full_name }}</span>
+    <span class="uk-text-large">Student &raquo; <a href="{{ route('students.show', ['id' => $student->id]) }}">{{ $student->full_name }}</a> &raquo; Classrooms</span>
 @endsection
 
 
@@ -10,8 +10,7 @@
     <div class="uk-grid" uk-grid>
         <div class="uk-width-expand">
             <ul class="uk-tab">
-                <li {!! $view == 'weekly' ? 'class="uk-active"': '' !!}><a href="{{ route('student.classrooms', ['id' => $student->id, 'view' => 'weekly']) }}">This Week</a></li>
-                <li {!! $view == 'monthly' ? 'class="uk-active"': '' !!}><a href="{{ route('student.classrooms', ['id' => $student->id, 'view' => 'monthly']) }}">Monthly</a></li>
+                <li {!! $view == 'monthly' ? 'class="uk-active"': '' !!}><a href="{{ route('student.classrooms', ['id' => $student->id, 'view' => 'monthly']) }}">Calendar</a></li>
                 @if ($view == 'date')
                     <li class="uk-active"><a>View by date ({{ $dateDay->format('j F Y') }})</a></li>
                 @endif
@@ -67,7 +66,11 @@
             </div>
         </form>
     </div>
-    <br>
+
+    <div class="uk-margin">
+        <button class="uk-button uk-button-primary">Add Classroom</button>
+    </div>
+    
     @include('includes.classroomview', [
         'id' => 'classroom',
         'view' => $view,

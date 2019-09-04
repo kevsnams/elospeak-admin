@@ -7,6 +7,8 @@ use Illuminate\Validation\Rule;
 use App\WebsiteSetting;
 use Auth;
 
+use App\Elospeak\Timeslots;
+
 class StoreEnrollment extends FormRequest
 {
     /**
@@ -30,17 +32,8 @@ class StoreEnrollment extends FormRequest
      */
     public function rules()
     {
-        $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
-        $classroomTimeSlots = classroomTimeSlotsValues(createClassroomTimeSlots(
-            // Opens 7AM
-            $webSettings['CLASSROOM']['start_hour'],
-
-            // Closes 11 PM
-            $webSettings['CLASSROOM']['end_hour'],
-
-            // Class duration
-            $webSettings['CLASSROOM']['duration']
-        ));
+        $timeslots = new Timeslots();
+        $classroomTimeSlots = $timeslots->flatten();
 
         return [
             'student.username' => 'required|min:6|max:50|unique:students,username',

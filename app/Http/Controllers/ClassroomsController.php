@@ -8,6 +8,8 @@ use App\Student;
 use App\Teacher;
 use App\WebsiteSetting;
 
+use App\Elospeak\Timeslots;
+
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
@@ -37,9 +39,18 @@ class ClassroomsController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function create()
+    public function create(Request $request)
     {
-        //
+        $studentId = $request->input('student_id');
+        $student = null;
+
+        if ($studentId) {
+            $student = Student::findOrFail($studentId);
+        }
+
+        return view('classrooms.create', [
+            'student' => $student
+        ]);
     }
 
     /**
@@ -135,27 +146,9 @@ class ClassroomsController extends Controller
         $studentId = $request->input('student_id');
         $date = $request->input('date');
 
-        $webSettings = parseWebSettings(WebsiteSetting::classrooms()->get());
-        $timeslots = createClassroomTimeSlots(
-            $webSettings['CLASSROOM']['start_hour'],
-            $webSettings['CLASSROOM']['end_hour'],
-            $webSettings['CLASSROOM']['duration']
-        );
+        $timeslots = Timeslots::getAvailableByDate($date, 'student', $studentId);
 
-        $filledClassrooms = Classroom::where('student_id', $studentId)->whereRaw('DATE(start) = ?', [$date])->get();
-
-        $foundKeys = [];
-        foreach ($filledClassrooms as $classroom) {
-            $foundKeys[] = array_search(date('H:i', strtotime($classroom->start)), array_column($timeslots, 0));
-        }
-
-        $availableSlots = array_values(
-            array_filter($timeslots, function ($key) use ($foundKeys) {
-                return !in_array($key, array_keys($foundKeys));
-            }, ARRAY_FILTER_USE_KEY)
-        );
-
-        return response()->json($availableSlots);
+        return response()->json($timeslots->getSlots());
     }
 
     public function teachers(Request $request)
