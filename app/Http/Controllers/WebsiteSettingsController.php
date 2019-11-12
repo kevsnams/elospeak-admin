@@ -33,7 +33,8 @@ class WebsiteSettingsController extends Controller
             'CLASSROOM.price_per_class' => 'required|numeric',
             'CLASSROOM.duration' => 'required|integer',
             'CLASSROOM.price_per_class_weekend' => 'required|numeric',
-            'TEACHER.salary_per_class' => 'required|numeric'
+            'TEACHER.salary_per_class' => 'required|numeric',
+            'CLASSROOM.offset' => 'required|numeric'
         ]);
         
         foreach ($input as $group => $settings) {
