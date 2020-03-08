@@ -14,7 +14,7 @@ class TeachersTableSeeder extends Seeder
         for ($i = 0; $i < 20; $i++) {
             DB::table('teachers')->insert([
                 'username' => Str::random(10),
-                'password' => bcrypt('69lego69'),
+                'password' => bcrypt('123'),
                 'email' => Str::random(10) .'@gmail.com',
                 'skype' => Str::random(10),
                 'full_name' => 'Dummy '. ucfirst(Str::random(10)),

@@ -1,0 +1,12 @@
+{
+  "version": 3,
+  "file": "bundle.css",
+  "sources": [
+    "..\\..\\spa-admin\\App.svelte"
+  ],
+  "sourcesContent": [
+    "<script>\nexport let csrf_token;\n\nfunction logout()\n{\n\n}\n</script>\n\n<div class=\"container\">\n\t<div class=\"row mt-3\">\n\t\t<div class=\"col-3\">\n\t\t\t<h1 class=\"text-center\">ELOSpeak</h1>\n\t\t\t<div class=\"nav flex-column nav-pills mt-3\">\n\t\t\t\t<a href=\"#/home\" class=\"nav-link active\">Overview</a>\n\t\t\t\t<a href=\"#/teachers\" class=\"nav-link\">Teachers</a>\n\t\t\t\t<a href=\"#/students\" class=\"nav-link\">Students</a>\n\t\t\t\t<a href=\"javascript:;\" on:click=\"{logout}\" class=\"nav-link\">Logout</a>\n\t\t\t</div>\n\t\t</div>\n\n\t\t<div class=\"col-9\">\n\t\t\t2\n\t\t</div>\n\t</div>\n</div>\n\n<form method=\"POST\" action=\"./logout\">\n\t<input type=\"hidden\" name=\"_token\" value={csrf_token} />\n</form>\n\n<style>\n\t:global(#main) {\n\t\tfont-family: 'Nunito', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;\n\t}\n</style>"
+  ],
+  "names": [],
+  "mappings": "AAgCS,KAAK,AAAE,CAAC,AACf,WAAW,CAAE,QAAQ,CAAC,CAAC,UAAU,CAAC,CAAC,MAAM,CAAC,CAAC,MAAM,CAAC,CAAC,OAAO,CAAC,CAAC,UAAU,AACvE,CAAC"
+}

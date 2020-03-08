@@ -5,4 +5,6 @@
         <img src="<?php echo url('/splash.png') ?>">
         <div class="uk-text-lead" style="font-weight: 200">Coming Soon</div>
     </div>
+    <?php $test = 'foo'; ?>
+    <?php //test ?>
 @endsection

@@ -12,6 +12,7 @@
 */
 
 Auth::routes();
+Route::get('/app', 'HomeController@app')->name('app');
 Route::get('/', 'HomeController@index')->name('home');
 
 Route::resource('teachers', 'TeachersController');
