@@ -85,6 +85,7 @@ async function submitAddForm()
             }
         }
     }
+    
 
     fields.prop('disabled', false);
 }
