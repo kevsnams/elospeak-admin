@@ -18,11 +18,13 @@ class StoreStudent extends FormRequest
 
     public function withValidator($validator)
     {
+        /*
         $validator->after(function ($validator) {
             if ($this->checkScheduleDaysValue()) {
                 $validator->errors()->add('schedule_days', 'One of the preferred days has an incorrect value');
             }
         });
+        */
     }
 
     private function checkScheduleDaysValue()
@@ -55,24 +57,21 @@ class StoreStudent extends FormRequest
             case 'POST':
             {
                 return [
-                    'username' => 'required|min:6|max:50|unique:students,username',
+                    'username' => 'required|min:4|max:50|unique:students,username',
                     'password' => 'required',
                     'password_repeat' => 'required|same:password',
                     'full_name' => 'required',
                     'email' => 'required|email|unique:students,email',
-                    'personal_contact_number' => 'required|numeric',
+                    'personal_contact_number' => 'numeric',
                     'skype' => 'required|max:30',
                     'birthday' => [
-                        'required',
                         'date_format:d F Y'
                     ],
-                    'schedule_days' => 'required|array',
+                    'schedule_days' => 'array',
                     'schedule_start_time' => [
-                        'required',
                         'regex:/[0-9][0-9]\:[0-9][0-9]/'
                     ],
                     'schedule_start_date' => [
-                        'required',
                         'date_format:d F Y'
                     ]
                 ];
@@ -81,7 +80,7 @@ class StoreStudent extends FormRequest
             case 'PATCH':
             {
                 return [
-                    'username' => 'required|min:6|max:50|unique:students,username,'. $this->input('username') .',username',
+                    'username' => 'required|min:4|max:50|unique:students,username,'. $this->input('username') .',username',
                     'password' => 'sometimes|present',
                     'password_repeat' => 'sometimes|present|same:password',
                     'full_name' => 'required',

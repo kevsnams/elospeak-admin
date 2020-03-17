@@ -25,10 +25,7 @@ class TeachersController extends Controller
     {
         $teachers = Teacher::orderBy('full_name', 'ASC')->get();
 
-        return view('teachers.index', [
-            'teachers' => $teachers,
-            'educationalAttainments' => Teacher::getEducationalAttainmentValues()
-        ]);
+        return response()->json($teachers->toArray());
     }
 
     /**
@@ -55,18 +52,17 @@ class TeachersController extends Controller
         $teacher->username = $input['username'];
         $teacher->password = Hash::make($input['password']);
         $teacher->full_name = ucwords($input['full_name']);
+        $teacher->salary = $input['salary'];
         $teacher->email = $input['email'];
-        $teacher->personal_contact_number = $input['personal_contact_number'];
         $teacher->skype = $input['skype'];
-        $teacher->address = $input['address'];
         $teacher->educational_attainment = $input['educational_attainment'];
-        $teacher->birthday = date('Y-m-d', strtotime($input['birthday']));
 
         $teacher->save();
 
         return response()->json([
             'success' => true,
-            'method' => 'store'
+            'method' => 'store',
+            'id' => $teacher->id
         ]);
     }
 
@@ -139,6 +135,13 @@ class TeachersController extends Controller
         $teacher = Teacher::find($id);
         $teacher->delete();
 
-        return redirect(route('teachers.index'))->with('statusDelete', 'Successfully Deleted Teacher');
+        return response()->json([
+            'success' => true
+        ]);
+    }
+
+    public function getEducationalAttainment()
+    {
+        return response()->json(Teacher::getEducationalAttainmentValues());
     }
 }

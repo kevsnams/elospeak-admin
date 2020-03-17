@@ -27,11 +27,20 @@ Route::name('classroom.')->group(function () {
 Route::name('settings.')->group(function () {
     Route::get('/settings', 'WebsiteSettingsController@index')->name('index');
     Route::post('/settings', 'WebsiteSettingsController@save')->name('save');
+
+    Route::get('/settings/register', 'WebsiteSettingsController@register')->name('register');
+    Route::post('/settings/modify', 'WebsiteSettingsController@modify')->name('modify');
+    Route::post('/settings/delete', 'WebsiteSettingsController@delete')->name('delete');
+    Route::post('/settings/add', 'WebsiteSettingsController@add')->name('add');
 });
 
 Route::name('student.')->group(function () {
     Route::get('/student/classrooms/{id}/{view?}/{date?}', 'StudentsController@classrooms')->name('classrooms');
     Route::get('/student/classrooms/add/{id}/', 'StudentsController@addClassroom')->name('add-classroom');
+});
+
+Route::name('teacher.')->group(function () {
+    Route::get('/teacher/educational-attainment', 'TeachersController@getEducationalAttainment')->name('educational-attainment');
 });
 
 Route::name('enroll.')->group(function() {

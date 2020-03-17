@@ -27,6 +27,49 @@ class WebsiteSettingsController extends Controller
         ]);
     }
 
+    public function register(Request $request)
+    {
+        $settings = WebsiteSetting::orderBy('key')->get();
+
+        return response()->json($settings);
+    }
+
+    public function modify(Request $request)
+    {
+        $settings = WebsiteSetting::findOrFail($request->id);
+        $settings->value = $request->new_value;
+        $settings->save();
+
+        return response()->json([
+            'success' => true
+        ]);
+    }
+
+    public function delete(Request $request)
+    {
+        $settings = WebsiteSetting::findOrFail($request->id);
+        $settings->delete();
+
+        return response()->json([
+            'success' => true
+        ]);
+    }
+
+    public function add(Request $request)
+    {
+        $settings = new WebsiteSetting();
+        $settings->key = $request->key;
+        $settings->value = $request->value;
+
+        $response = ['success' => false];
+
+        if ($settings->save()) {
+            $response = ['success' => true];
+        }
+
+        return response()->json($response);
+    }
+
     public function save(Request $request)
     {
         $input = $request->validate([

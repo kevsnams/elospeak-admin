@@ -27,19 +27,11 @@ class StudentsController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index(Request $request)
+    public function index()
     {
-        $searchQuery = trim($request->input('query'));
-        $students = Student::orderBy('full_name', 'ASC')->where(function ($query) use ($searchQuery) {
-            if ($searchQuery) {
-                $query->where('full_name', 'LIKE', "$searchQuery%")
-                    ->orWhere('username', 'LIKE', "$searchQuery%");
-            }
-        })->get();
+        $students = Student::orderBy('full_name', 'ASC')->get();
 
-        return view('students.index', [
-            'students' => $students
-        ]);
+        return response()->json($students->toArray());
     }
 
     /**
@@ -52,9 +44,22 @@ class StudentsController extends Controller
         //
     }
 
-    public function store(Request $request)
+    public function store(StoreStudentRequest $request)
     {
-        
+        $input = $request->validated();
+
+        $student = new Student();
+        $student->username = $input['username'];
+        $student->password = Hash::make($input['password']);
+        $student->full_name = $input['full_name'];
+        $student->email = $input['email'];
+        $student->skype = $input['skype'];
+        $student->save();
+
+        return response()->json([
+            'success' => true,
+            'id' => $student->id
+        ]);
     }
 
     /**

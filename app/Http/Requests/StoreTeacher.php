@@ -36,14 +36,14 @@ class StoreTeacher extends FormRequest
                     'username' => 'required|min:6|max:50|unique:teachers,username',
                     'password' => 'required',
                     'password_repeat' => 'required|same:password',
-                    'full_name' => 'required',
+                    'full_name' => 'required|min:1|max:100',
                     'email' => 'required|email|unique:teachers,email',
-                    'personal_contact_number' => 'required|numeric',
+                    'personal_contact_number' => 'numeric',
                     'skype' => 'required|max:30',
-                    'address' => 'required|max:250',
+                    'salary' => 'required|numeric',
+                    'address' => 'max:250',
                     'educational_attainment' => 'required|in:0,1',
                     'birthday' => [
-                        'required',
                         'date_format:d F Y'
                     ]
                 ];
@@ -62,7 +62,6 @@ class StoreTeacher extends FormRequest
                     'address' => 'required|max:250',
                     'educational_attainment' => 'required|in:0,1',
                     'birthday' => [
-                        'required',
                         'date_format:d F Y'
                     ]
                 ];

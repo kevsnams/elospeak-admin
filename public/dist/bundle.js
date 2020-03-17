@@ -17720,6 +17720,9 @@ var app = (function () {
 	unwrapExports(bootstrap);
 
 	function noop() { }
+	function is_promise(value) {
+	    return value && typeof value === 'object' && typeof value.then === 'function';
+	}
 	function add_location(element, file, line, column, char) {
 	    element.__svelte_meta = {
 	        loc: { file, line, column, char }
@@ -17740,6 +17743,24 @@ var app = (function () {
 	function safe_not_equal(a, b) {
 	    return a != a ? b == b : a !== b || ((a && typeof a === 'object') || typeof a === 'function');
 	}
+	function validate_store(store, name) {
+	    if (store != null && typeof store.subscribe !== 'function') {
+	        throw new Error(`'${name}' is not a store with a 'subscribe' method`);
+	    }
+	}
+	function subscribe(store, ...callbacks) {
+	    if (store == null) {
+	        return noop;
+	    }
+	    const unsub = store.subscribe(...callbacks);
+	    return unsub.unsubscribe ? () => unsub.unsubscribe() : unsub;
+	}
+	function component_subscribe(component, store, callback) {
+	    component.$$.on_destroy.push(subscribe(store, callback));
+	}
+	function action_destroyer(action_result) {
+	    return action_result && is_function(action_result.destroy) ? action_result.destroy : noop;
+	}
 
 	function append(target, node) {
 	    target.appendChild(node);
@@ -17750,8 +17771,17 @@ var app = (function () {
 	function detach(node) {
 	    node.parentNode.removeChild(node);
 	}
+	function destroy_each(iterations, detaching) {
+	    for (let i = 0; i < iterations.length; i += 1) {
+	        if (iterations[i])
+	            iterations[i].d(detaching);
+	    }
+	}
 	function element(name) {
 	    return document.createElement(name);
+	}
+	function svg_element(name) {
+	    return document.createElementNS('http://www.w3.org/2000/svg', name);
 	}
 	function text(data) {
 	    return document.createTextNode(data);
@@ -17759,9 +17789,19 @@ var app = (function () {
 	function space() {
 	    return text(' ');
 	}
+	function empty() {
+	    return text('');
+	}
 	function listen(node, event, handler, options) {
 	    node.addEventListener(event, handler, options);
 	    return () => node.removeEventListener(event, handler, options);
+	}
+	function prevent_default(fn) {
+	    return function (event) {
+	        event.preventDefault();
+	        // @ts-ignore
+	        return fn.call(this, event);
+	    };
 	}
 	function attr(node, attribute, value) {
 	    if (value == null)
@@ -17772,6 +17812,11 @@ var app = (function () {
 	function children(element) {
 	    return Array.from(element.childNodes);
 	}
+	function set_input_value(input, value) {
+	    if (value != null || input.value) {
+	        input.value = value;
+	    }
+	}
 	function custom_event(type, detail) {
 	    const e = document.createEvent('CustomEvent');
 	    e.initCustomEvent(type, false, false, detail);
@@ -17781,6 +17826,28 @@ var app = (function () {
 	let current_component;
 	function set_current_component(component) {
 	    current_component = component;
+	}
+	function get_current_component() {
+	    if (!current_component)
+	        throw new Error(`Function called outside component initialization`);
+	    return current_component;
+	}
+	function onMount(fn) {
+	    get_current_component().$$.on_mount.push(fn);
+	}
+	function createEventDispatcher() {
+	    const component = get_current_component();
+	    return (type, detail) => {
+	        const callbacks = component.$$.callbacks[type];
+	        if (callbacks) {
+	            // TODO are there situations where events could be dispatched
+	            // in a server (non-DOM) environment?
+	            const event = custom_event(type, detail);
+	            callbacks.slice().forEach(fn => {
+	                fn.call(component, event);
+	            });
+	        }
+	    };
 	}
 
 	const dirty_components = [];
@@ -17846,11 +17913,112 @@ var app = (function () {
 	    }
 	}
 	const outroing = new Set();
+	let outros;
+	function group_outros() {
+	    outros = {
+	        r: 0,
+	        c: [],
+	        p: outros // parent group
+	    };
+	}
+	function check_outros() {
+	    if (!outros.r) {
+	        run_all(outros.c);
+	    }
+	    outros = outros.p;
+	}
 	function transition_in(block, local) {
 	    if (block && block.i) {
 	        outroing.delete(block);
 	        block.i(local);
 	    }
+	}
+	function transition_out(block, local, detach, callback) {
+	    if (block && block.o) {
+	        if (outroing.has(block))
+	            return;
+	        outroing.add(block);
+	        outros.c.push(() => {
+	            outroing.delete(block);
+	            if (callback) {
+	                if (detach)
+	                    block.d(1);
+	                callback();
+	            }
+	        });
+	        block.o(local);
+	    }
+	}
+
+	function handle_promise(promise, info) {
+	    const token = info.token = {};
+	    function update(type, index, key, value) {
+	        if (info.token !== token)
+	            return;
+	        info.resolved = value;
+	        let child_ctx = info.ctx;
+	        if (key !== undefined) {
+	            child_ctx = child_ctx.slice();
+	            child_ctx[key] = value;
+	        }
+	        const block = type && (info.current = type)(child_ctx);
+	        let needs_flush = false;
+	        if (info.block) {
+	            if (info.blocks) {
+	                info.blocks.forEach((block, i) => {
+	                    if (i !== index && block) {
+	                        group_outros();
+	                        transition_out(block, 1, 1, () => {
+	                            info.blocks[i] = null;
+	                        });
+	                        check_outros();
+	                    }
+	                });
+	            }
+	            else {
+	                info.block.d(1);
+	            }
+	            block.c();
+	            transition_in(block, 1);
+	            block.m(info.mount(), info.anchor);
+	            needs_flush = true;
+	        }
+	        info.block = block;
+	        if (info.blocks)
+	            info.blocks[index] = block;
+	        if (needs_flush) {
+	            flush();
+	        }
+	    }
+	    if (is_promise(promise)) {
+	        const current_component = get_current_component();
+	        promise.then(value => {
+	            set_current_component(current_component);
+	            update(info.then, 1, info.value, value);
+	            set_current_component(null);
+	        }, error => {
+	            set_current_component(current_component);
+	            update(info.catch, 2, info.error, error);
+	            set_current_component(null);
+	        });
+	        // if we previously had a then/catch block, destroy it
+	        if (info.current !== info.pending) {
+	            update(info.pending, 0);
+	            return true;
+	        }
+	    }
+	    else {
+	        if (info.current !== info.then) {
+	            update(info.then, 1, info.value, promise);
+	            return true;
+	        }
+	        info.resolved = promise;
+	    }
+	}
+
+	const globals = (typeof window !== 'undefined' ? window : global);
+	function create_component(block) {
+	    block && block.c();
 	}
 	function mount_component(component, target, anchor) {
 	    const { fragment, on_mount, on_destroy, after_update } = component.$$;
@@ -18003,6 +18171,22 @@ var app = (function () {
 	    node[property] = value;
 	    dispatch_dev("SvelteDOMSetProperty", { node, property, value });
 	}
+	function set_data_dev(text, data) {
+	    data = '' + data;
+	    if (text.data === data)
+	        return;
+	    dispatch_dev("SvelteDOMSetData", { node: text, data });
+	    text.data = data;
+	}
+	function validate_each_argument(arg) {
+	    if (typeof arg !== 'string' && !(arg && typeof arg === 'object' && 'length' in arg)) {
+	        let msg = '{#each} only iterates over array-like objects.';
+	        if (typeof Symbol === 'function' && arg && Symbol.iterator in arg) {
+	            msg += ' You can use a spread to convert this iterable into an array.';
+	        }
+	        throw new Error(msg);
+	    }
+	}
 	function validate_slots(name, slot, keys) {
 	    for (const slot_key of Object.keys(slot)) {
 	        if (!~keys.indexOf(slot_key)) {
@@ -18027,11 +18211,9287 @@ var app = (function () {
 	    $inject_state() { }
 	}
 
-	/* src\App.svelte generated by Svelte v3.19.2 */
+	const subscriber_queue = [];
+	/**
+	 * Creates a `Readable` store that allows reading by subscription.
+	 * @param value initial value
+	 * @param {StartStopNotifier}start start and stop notifications for subscriptions
+	 */
+	function readable(value, start) {
+	    return {
+	        subscribe: writable(value, start).subscribe,
+	    };
+	}
+	/**
+	 * Create a `Writable` store that allows both updating and reading by subscription.
+	 * @param {*=}value initial value
+	 * @param {StartStopNotifier=}start start and stop notifications for subscriptions
+	 */
+	function writable(value, start = noop) {
+	    let stop;
+	    const subscribers = [];
+	    function set(new_value) {
+	        if (safe_not_equal(value, new_value)) {
+	            value = new_value;
+	            if (stop) { // store is ready
+	                const run_queue = !subscriber_queue.length;
+	                for (let i = 0; i < subscribers.length; i += 1) {
+	                    const s = subscribers[i];
+	                    s[1]();
+	                    subscriber_queue.push(s, value);
+	                }
+	                if (run_queue) {
+	                    for (let i = 0; i < subscriber_queue.length; i += 2) {
+	                        subscriber_queue[i][0](subscriber_queue[i + 1]);
+	                    }
+	                    subscriber_queue.length = 0;
+	                }
+	            }
+	        }
+	    }
+	    function update(fn) {
+	        set(fn(value));
+	    }
+	    function subscribe(run, invalidate = noop) {
+	        const subscriber = [run, invalidate];
+	        subscribers.push(subscriber);
+	        if (subscribers.length === 1) {
+	            stop = start(set) || noop;
+	        }
+	        run(value);
+	        return () => {
+	            const index = subscribers.indexOf(subscriber);
+	            if (index !== -1) {
+	                subscribers.splice(index, 1);
+	            }
+	            if (subscribers.length === 0) {
+	                stop();
+	                stop = null;
+	            }
+	        };
+	    }
+	    return { set, update, subscribe };
+	}
+	function derived(stores, fn, initial_value) {
+	    const single = !Array.isArray(stores);
+	    const stores_array = single
+	        ? [stores]
+	        : stores;
+	    const auto = fn.length < 2;
+	    return readable(initial_value, (set) => {
+	        let inited = false;
+	        const values = [];
+	        let pending = 0;
+	        let cleanup = noop;
+	        const sync = () => {
+	            if (pending) {
+	                return;
+	            }
+	            cleanup();
+	            const result = fn(single ? values[0] : values, set);
+	            if (auto) {
+	                set(result);
+	            }
+	            else {
+	                cleanup = is_function(result) ? result : noop;
+	            }
+	        };
+	        const unsubscribers = stores_array.map((store, i) => subscribe(store, (value) => {
+	            values[i] = value;
+	            pending &= ~(1 << i);
+	            if (inited) {
+	                sync();
+	            }
+	        }, () => {
+	            pending |= (1 << i);
+	        }));
+	        inited = true;
+	        sync();
+	        return function stop() {
+	            run_all(unsubscribers);
+	            cleanup();
+	        };
+	    });
+	}
 
-	const file = "src\\App.svelte";
+	function regexparam (str, loose) {
+		if (str instanceof RegExp) return { keys:false, pattern:str };
+		var c, o, tmp, ext, keys=[], pattern='', arr = str.split('/');
+		arr[0] || arr.shift();
+
+		while (tmp = arr.shift()) {
+			c = tmp[0];
+			if (c === '*') {
+				keys.push('wild');
+				pattern += '/(.*)';
+			} else if (c === ':') {
+				o = tmp.indexOf('?', 1);
+				ext = tmp.indexOf('.', 1);
+				keys.push( tmp.substring(1, !!~o ? o : !!~ext ? ext : tmp.length) );
+				pattern += !!~o && !~ext ? '(?:/([^/]+?))?' : '/([^/]+?)';
+				if (!!~ext) pattern += (!!~o ? '?' : '') + '\\' + tmp.substring(ext);
+			} else {
+				pattern += '/' + tmp;
+			}
+		}
+
+		return {
+			keys: keys,
+			pattern: new RegExp('^' + pattern + (loose ? '(?=$|\/)' : '\/?$'), 'i')
+		};
+	}
+
+	/* node_modules\svelte-spa-router\Router.svelte generated by Svelte v3.19.2 */
+
+	const { Error: Error_1, Object: Object_1 } = globals;
+
+	// (185:0) {:else}
+	function create_else_block(ctx) {
+		let switch_instance_anchor;
+		let current;
+		var switch_value = /*component*/ ctx[0];
+
+		function switch_props(ctx) {
+			return { $$inline: true };
+		}
+
+		if (switch_value) {
+			var switch_instance = new switch_value(switch_props());
+		}
+
+		const block = {
+			c: function create() {
+				if (switch_instance) create_component(switch_instance.$$.fragment);
+				switch_instance_anchor = empty();
+			},
+			m: function mount(target, anchor) {
+				if (switch_instance) {
+					mount_component(switch_instance, target, anchor);
+				}
+
+				insert_dev(target, switch_instance_anchor, anchor);
+				current = true;
+			},
+			p: function update(ctx, dirty) {
+				if (switch_value !== (switch_value = /*component*/ ctx[0])) {
+					if (switch_instance) {
+						group_outros();
+						const old_component = switch_instance;
+
+						transition_out(old_component.$$.fragment, 1, 0, () => {
+							destroy_component(old_component, 1);
+						});
+
+						check_outros();
+					}
+
+					if (switch_value) {
+						switch_instance = new switch_value(switch_props());
+						create_component(switch_instance.$$.fragment);
+						transition_in(switch_instance.$$.fragment, 1);
+						mount_component(switch_instance, switch_instance_anchor.parentNode, switch_instance_anchor);
+					} else {
+						switch_instance = null;
+					}
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				if (switch_instance) transition_in(switch_instance.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				if (switch_instance) transition_out(switch_instance.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(switch_instance_anchor);
+				if (switch_instance) destroy_component(switch_instance, detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block.name,
+			type: "else",
+			source: "(185:0) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (183:0) {#if componentParams}
+	function create_if_block(ctx) {
+		let switch_instance_anchor;
+		let current;
+		var switch_value = /*component*/ ctx[0];
+
+		function switch_props(ctx) {
+			return {
+				props: { params: /*componentParams*/ ctx[1] },
+				$$inline: true
+			};
+		}
+
+		if (switch_value) {
+			var switch_instance = new switch_value(switch_props(ctx));
+		}
+
+		const block = {
+			c: function create() {
+				if (switch_instance) create_component(switch_instance.$$.fragment);
+				switch_instance_anchor = empty();
+			},
+			m: function mount(target, anchor) {
+				if (switch_instance) {
+					mount_component(switch_instance, target, anchor);
+				}
+
+				insert_dev(target, switch_instance_anchor, anchor);
+				current = true;
+			},
+			p: function update(ctx, dirty) {
+				const switch_instance_changes = {};
+				if (dirty & /*componentParams*/ 2) switch_instance_changes.params = /*componentParams*/ ctx[1];
+
+				if (switch_value !== (switch_value = /*component*/ ctx[0])) {
+					if (switch_instance) {
+						group_outros();
+						const old_component = switch_instance;
+
+						transition_out(old_component.$$.fragment, 1, 0, () => {
+							destroy_component(old_component, 1);
+						});
+
+						check_outros();
+					}
+
+					if (switch_value) {
+						switch_instance = new switch_value(switch_props(ctx));
+						create_component(switch_instance.$$.fragment);
+						transition_in(switch_instance.$$.fragment, 1);
+						mount_component(switch_instance, switch_instance_anchor.parentNode, switch_instance_anchor);
+					} else {
+						switch_instance = null;
+					}
+				} else if (switch_value) {
+					switch_instance.$set(switch_instance_changes);
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				if (switch_instance) transition_in(switch_instance.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				if (switch_instance) transition_out(switch_instance.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(switch_instance_anchor);
+				if (switch_instance) destroy_component(switch_instance, detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block.name,
+			type: "if",
+			source: "(183:0) {#if componentParams}",
+			ctx
+		});
+
+		return block;
+	}
 
 	function create_fragment(ctx) {
+		let current_block_type_index;
+		let if_block;
+		let if_block_anchor;
+		let current;
+		const if_block_creators = [create_if_block, create_else_block];
+		const if_blocks = [];
+
+		function select_block_type(ctx, dirty) {
+			if (/*componentParams*/ ctx[1]) return 0;
+			return 1;
+		}
+
+		current_block_type_index = select_block_type(ctx);
+		if_block = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+
+		const block = {
+			c: function create() {
+				if_block.c();
+				if_block_anchor = empty();
+			},
+			l: function claim(nodes) {
+				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				if_blocks[current_block_type_index].m(target, anchor);
+				insert_dev(target, if_block_anchor, anchor);
+				current = true;
+			},
+			p: function update(ctx, [dirty]) {
+				let previous_block_index = current_block_type_index;
+				current_block_type_index = select_block_type(ctx);
+
+				if (current_block_type_index === previous_block_index) {
+					if_blocks[current_block_type_index].p(ctx, dirty);
+				} else {
+					group_outros();
+
+					transition_out(if_blocks[previous_block_index], 1, 1, () => {
+						if_blocks[previous_block_index] = null;
+					});
+
+					check_outros();
+					if_block = if_blocks[current_block_type_index];
+
+					if (!if_block) {
+						if_block = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+						if_block.c();
+					}
+
+					transition_in(if_block, 1);
+					if_block.m(if_block_anchor.parentNode, if_block_anchor);
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(if_block);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(if_block);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if_blocks[current_block_type_index].d(detaching);
+				if (detaching) detach_dev(if_block_anchor);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function wrap(route, userData, ...conditions) {
+		// Check if we don't have userData
+		if (userData && typeof userData == "function") {
+			conditions = conditions && conditions.length ? conditions : [];
+			conditions.unshift(userData);
+			userData = undefined;
+		}
+
+		// Parameter route and each item of conditions must be functions
+		if (!route || typeof route != "function") {
+			throw Error("Invalid parameter route");
+		}
+
+		if (conditions && conditions.length) {
+			for (let i = 0; i < conditions.length; i++) {
+				if (!conditions[i] || typeof conditions[i] != "function") {
+					throw Error("Invalid parameter conditions[" + i + "]");
+				}
+			}
+		}
+
+		// Returns an object that contains all the functions to execute too
+		const obj = { route, userData };
+
+		if (conditions && conditions.length) {
+			obj.conditions = conditions;
+		}
+
+		// The _sveltesparouter flag is to confirm the object was created by this router
+		Object.defineProperty(obj, "_sveltesparouter", { value: true });
+
+		return obj;
+	}
+
+	/**
+	 * @typedef {Object} Location
+	 * @property {string} location - Location (page/view), for example `/book`
+	 * @property {string} [querystring] - Querystring from the hash, as a string not parsed
+	 */
+	/**
+	 * Returns the current location from the hash.
+	 *
+	 * @returns {Location} Location object
+	 * @private
+	 */
+	function getLocation() {
+		const hashPosition = window.location.href.indexOf("#/");
+
+		let location = hashPosition > -1
+		? window.location.href.substr(hashPosition + 1)
+		: "/";
+
+		// Check if there's a querystring
+		const qsPosition = location.indexOf("?");
+
+		let querystring = "";
+
+		if (qsPosition > -1) {
+			querystring = location.substr(qsPosition + 1);
+			location = location.substr(0, qsPosition);
+		}
+
+		return { location, querystring };
+	}
+
+	const loc = readable(getLocation(), // eslint-disable-next-line prefer-arrow-callback
+	function start(set) {
+		const update = () => {
+			set(getLocation());
+		};
+
+		window.addEventListener("hashchange", update, false);
+
+		return function stop() {
+			window.removeEventListener("hashchange", update, false);
+		};
+	});
+
+	const location = derived(loc, $loc => $loc.location);
+	const querystring = derived(loc, $loc => $loc.querystring);
+
+	function push(location) {
+		if (!location || location.length < 1 || location.charAt(0) != "/" && location.indexOf("#/") !== 0) {
+			throw Error("Invalid parameter location");
+		}
+
+		// Execute this code when the current call stack is complete
+		setTimeout(
+			() => {
+				window.location.hash = (location.charAt(0) == "#" ? "" : "#") + location;
+			},
+			0
+		);
+	}
+
+	function pop() {
+		// Execute this code when the current call stack is complete
+		setTimeout(
+			() => {
+				window.history.back();
+			},
+			0
+		);
+	}
+
+	function replace(location) {
+		if (!location || location.length < 1 || location.charAt(0) != "/" && location.indexOf("#/") !== 0) {
+			throw Error("Invalid parameter location");
+		}
+
+		// Execute this code when the current call stack is complete
+		setTimeout(
+			() => {
+				const dest = (location.charAt(0) == "#" ? "" : "#") + location;
+				history.replaceState(undefined, undefined, dest);
+
+				// The method above doesn't trigger the hashchange event, so let's do that manually
+				window.dispatchEvent(new Event("hashchange"));
+			},
+			0
+		);
+	}
+
+	function link(node) {
+		// Only apply to <a> tags
+		if (!node || !node.tagName || node.tagName.toLowerCase() != "a") {
+			throw Error("Action \"link\" can only be used with <a> tags");
+		}
+
+		// Destination must start with '/'
+		const href = node.getAttribute("href");
+
+		if (!href || href.length < 1 || href.charAt(0) != "/") {
+			throw Error("Invalid value for \"href\" attribute");
+		}
+
+		// Add # to every href attribute
+		node.setAttribute("href", "#" + href);
+	}
+
+	function instance($$self, $$props, $$invalidate) {
+		let $loc,
+			$$unsubscribe_loc = noop;
+
+		validate_store(loc, "loc");
+		component_subscribe($$self, loc, $$value => $$invalidate(4, $loc = $$value));
+		$$self.$$.on_destroy.push(() => $$unsubscribe_loc());
+		let { routes = {} } = $$props;
+		let { prefix = "" } = $$props;
+
+		/**
+	 * Container for a route: path, component
+	 */
+		class RouteItem {
+			/**
+	 * Initializes the object and creates a regular expression from the path, using regexparam.
+	 *
+	 * @param {string} path - Path to the route (must start with '/' or '*')
+	 * @param {SvelteComponent} component - Svelte component for the route
+	 */
+			constructor(path, component) {
+				if (!component || typeof component != "function" && (typeof component != "object" || component._sveltesparouter !== true)) {
+					throw Error("Invalid component object");
+				}
+
+				// Path must be a regular or expression, or a string starting with '/' or '*'
+				if (!path || typeof path == "string" && (path.length < 1 || path.charAt(0) != "/" && path.charAt(0) != "*") || typeof path == "object" && !(path instanceof RegExp)) {
+					throw Error("Invalid value for \"path\" argument");
+				}
+
+				const { pattern, keys } = regexparam(path);
+				this.path = path;
+
+				// Check if the component is wrapped and we have conditions
+				if (typeof component == "object" && component._sveltesparouter === true) {
+					this.component = component.route;
+					this.conditions = component.conditions || [];
+					this.userData = component.userData;
+				} else {
+					this.component = component;
+					this.conditions = [];
+					this.userData = undefined;
+				}
+
+				this._pattern = pattern;
+				this._keys = keys;
+			}
+
+			/**
+	 * Checks if `path` matches the current route.
+	 * If there's a match, will return the list of parameters from the URL (if any).
+	 * In case of no match, the method will return `null`.
+	 *
+	 * @param {string} path - Path to test
+	 * @returns {null|Object.<string, string>} List of paramters from the URL if there's a match, or `null` otherwise.
+	 */
+			match(path) {
+				// If there's a prefix, remove it before we run the matching
+				if (prefix && path.startsWith(prefix)) {
+					path = path.substr(prefix.length) || "/";
+				}
+
+				// Check if the pattern matches
+				const matches = this._pattern.exec(path);
+
+				if (matches === null) {
+					return null;
+				}
+
+				// If the input was a regular expression, this._keys would be false, so return matches as is
+				if (this._keys === false) {
+					return matches;
+				}
+
+				const out = {};
+				let i = 0;
+
+				while (i < this._keys.length) {
+					out[this._keys[i]] = matches[++i] || null;
+				}
+
+				return out;
+			}
+
+			/**
+	 * Dictionary with route details passed to the pre-conditions functions, as well as the `routeLoaded` and `conditionsFailed` events
+	 * @typedef {Object} RouteDetail
+	 * @property {SvelteComponent} component - Svelte component
+	 * @property {string} name - Name of the Svelte component
+	 * @property {string} location - Location path
+	 * @property {string} querystring - Querystring from the hash
+	 * @property {Object} [userData] - Custom data passed by the user
+	 */
+			/**
+	 * Executes all conditions (if any) to control whether the route can be shown. Conditions are executed in the order they are defined, and if a condition fails, the following ones aren't executed.
+	 * 
+	 * @param {RouteDetail} detail - Route detail
+	 * @returns {bool} Returns true if all the conditions succeeded
+	 */
+			checkConditions(detail) {
+				for (let i = 0; i < this.conditions.length; i++) {
+					if (!this.conditions[i](detail)) {
+						return false;
+					}
+				}
+
+				return true;
+			}
+		}
+
+		// Set up all routes
+		const routesList = [];
+
+		if (routes instanceof Map) {
+			// If it's a map, iterate on it right away
+			routes.forEach((route, path) => {
+				routesList.push(new RouteItem(path, route));
+			});
+		} else {
+			// We have an object, so iterate on its own properties
+			Object.keys(routes).forEach(path => {
+				routesList.push(new RouteItem(path, routes[path]));
+			});
+		}
+
+		// Props for the component to render
+		let component = null;
+
+		let componentParams = null;
+
+		// Event dispatcher from Svelte
+		const dispatch = createEventDispatcher();
+
+		// Just like dispatch, but executes on the next iteration of the event loop
+		const dispatchNextTick = (name, detail) => {
+			// Execute this code when the current call stack is complete
+			setTimeout(
+				() => {
+					dispatch(name, detail);
+				},
+				0
+			);
+		};
+
+		const writable_props = ["routes", "prefix"];
+
+		Object_1.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Router> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("Router", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("routes" in $$props) $$invalidate(2, routes = $$props.routes);
+			if ("prefix" in $$props) $$invalidate(3, prefix = $$props.prefix);
+		};
+
+		$$self.$capture_state = () => ({
+			readable,
+			derived,
+			wrap,
+			getLocation,
+			loc,
+			location,
+			querystring,
+			push,
+			pop,
+			replace,
+			link,
+			createEventDispatcher,
+			regexparam,
+			routes,
+			prefix,
+			RouteItem,
+			routesList,
+			component,
+			componentParams,
+			dispatch,
+			dispatchNextTick,
+			$loc
+		});
+
+		$$self.$inject_state = $$props => {
+			if ("routes" in $$props) $$invalidate(2, routes = $$props.routes);
+			if ("prefix" in $$props) $$invalidate(3, prefix = $$props.prefix);
+			if ("component" in $$props) $$invalidate(0, component = $$props.component);
+			if ("componentParams" in $$props) $$invalidate(1, componentParams = $$props.componentParams);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		$$self.$$.update = () => {
+			if ($$self.$$.dirty & /*component, $loc*/ 17) {
+				// Handle hash change events
+				// Listen to changes in the $loc store and update the page
+				 {
+					// Find a route matching the location
+					$$invalidate(0, component = null);
+
+					let i = 0;
+
+					while (!component && i < routesList.length) {
+						const match = routesList[i].match($loc.location);
+
+						if (match) {
+							const detail = {
+								component: routesList[i].component,
+								name: routesList[i].component.name,
+								location: $loc.location,
+								querystring: $loc.querystring,
+								userData: routesList[i].userData
+							};
+
+							// Check if the route can be loaded - if all conditions succeed
+							if (!routesList[i].checkConditions(detail)) {
+								// Trigger an event to notify the user
+								dispatchNextTick("conditionsFailed", detail);
+
+								break;
+							}
+
+							$$invalidate(0, component = routesList[i].component);
+
+							// Set componentParams onloy if we have a match, to avoid a warning similar to `<Component> was created with unknown prop 'params'`
+							// Of course, this assumes that developers always add a "params" prop when they are expecting parameters
+							if (match && typeof match == "object" && Object.keys(match).length) {
+								$$invalidate(1, componentParams = match);
+							} else {
+								$$invalidate(1, componentParams = null);
+							}
+
+							dispatchNextTick("routeLoaded", detail);
+						}
+
+						i++;
+					}
+				}
+			}
+		};
+
+		return [component, componentParams, routes, prefix];
+	}
+
+	class Router extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance, create_fragment, safe_not_equal, { routes: 2, prefix: 3 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "Router",
+				options,
+				id: create_fragment.name
+			});
+		}
+
+		get routes() {
+			throw new Error_1("<Router>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set routes(value) {
+			throw new Error_1("<Router>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get prefix() {
+			throw new Error_1("<Router>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set prefix(value) {
+			throw new Error_1("<Router>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	// List of nodes to update
+	const nodes = [];
+
+	// Current location
+	let location$1;
+
+	// Function that updates all nodes marking the active ones
+	function checkActive(el) {
+	    // Remove the active class from all elements
+	    el.node.classList.remove(el.className);
+
+	    // If the pattern matches, then set the active class
+	    if (el.pattern.test(location$1)) {
+	        el.node.classList.add(el.className);
+	    }
+	}
+
+	// Listen to changes in the location
+	loc.subscribe((value) => {
+	    // Update the location
+	    location$1 = value.location + (value.querystring ? '?' + value.querystring : '');
+
+	    // Update all nodes
+	    nodes.map(checkActive);
+	});
+
+	/**
+	 * @typedef {Object} ActiveOptions
+	 * @property {string|RegExp} [path] - Path expression that makes the link active when matched (must start with '/' or '*'); default is the link's href
+	 * @property {string} [className] - CSS class to apply to the element when active; default value is "active"
+	 */
+
+	/**
+	 * Svelte Action for automatically adding the "active" class to elements (links, or any other DOM element) when the current location matches a certain path.
+	 * 
+	 * @param {HTMLElement} node - The target node (automatically set by Svelte)
+	 * @param {ActiveOptions|string|RegExp} [opts] - Can be an object of type ActiveOptions, or a string (or regular expressions) representing ActiveOptions.path.
+	 */
+	function active(node, opts) {
+	    // Check options
+	    if (opts && (typeof opts == 'string' || (typeof opts == 'object' && opts instanceof RegExp))) {
+	        // Interpret strings and regular expressions as opts.path
+	        opts = {
+	            path: opts
+	        };
+	    }
+	    else {
+	        // Ensure opts is a dictionary
+	        opts = opts || {};
+	    }
+
+	    // Path defaults to link target
+	    if (!opts.path && node.hasAttribute('href')) {
+	        opts.path = node.getAttribute('href');
+	        if (opts.path && opts.path.length > 1 && opts.path.charAt(0) == '#') {
+	            opts.path = opts.path.substring(1);
+	        }
+	    }
+
+	    // Default class name
+	    if (!opts.className) {
+	        opts.className = 'active';
+	    }
+
+	    // If path is a string, it must start with '/' or '*'
+	    if (!opts.path || 
+	        typeof opts.path == 'string' && (opts.path.length < 1 || (opts.path.charAt(0) != '/' && opts.path.charAt(0) != '*'))
+	    ) {
+	        throw Error('Invalid value for "path" argument')
+	    }
+
+	    // If path is not a regular expression already, make it
+	    const {pattern} = typeof opts.path == 'string' ?
+	        regexparam(opts.path) :
+	        {pattern: opts.path};
+
+	    // Add the node to the list
+	    const el = {
+	        node,
+	        className: opts.className,
+	        pattern
+	    };
+	    nodes.push(el);
+
+	    // Trigger the action right away
+	    checkActive(el);
+
+	    return {
+	        // When the element is destroyed, remove it from the list
+	        destroy() {
+	            nodes.splice(nodes.indexOf(el), 1);
+	        }
+	    }
+	}
+
+	/* src\routes\Home.svelte generated by Svelte v3.19.2 */
+
+	const file = "src\\routes\\Home.svelte";
+
+	function create_fragment$1(ctx) {
+		let div1;
+		let div0;
+		let span;
+
+		const block = {
+			c: function create() {
+				div1 = element("div");
+				div0 = element("div");
+				span = element("span");
+				span.textContent = "Coming Soon";
+				attr_dev(span, "class", "lead");
+				add_location(span, file, 2, 8, 64);
+				add_location(div0, file, 1, 4, 49);
+				attr_dev(div1, "class", "d-flex justify-content-center");
+				add_location(div1, file, 0, 0, 0);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div1, anchor);
+				append_dev(div1, div0);
+				append_dev(div0, span);
+			},
+			p: noop,
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div1);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$1.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$1($$self, $$props) {
+		const writable_props = [];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Home> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("Home", $$slots, []);
+		return [];
+	}
+
+	class Home extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$1, create_fragment$1, safe_not_equal, {});
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "Home",
+				options,
+				id: create_fragment$1.name
+			});
+		}
+	}
+
+	var underscore = createCommonjsModule(function (module, exports) {
+	//     Underscore.js 1.9.2
+	//     https://underscorejs.org
+	//     (c) 2009-2018 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
+	//     Underscore may be freely distributed under the MIT license.
+
+	(function() {
+
+	  // Baseline setup
+	  // --------------
+
+	  // Establish the root object, `window` (`self`) in the browser, `global`
+	  // on the server, or `this` in some virtual machines. We use `self`
+	  // instead of `window` for `WebWorker` support.
+	  var root = typeof self == 'object' && self.self === self && self ||
+	            typeof commonjsGlobal == 'object' && commonjsGlobal.global === commonjsGlobal && commonjsGlobal ||
+	            this ||
+	            {};
+
+	  // Save the previous value of the `_` variable.
+	  var previousUnderscore = root._;
+
+	  // Save bytes in the minified (but not gzipped) version:
+	  var ArrayProto = Array.prototype, ObjProto = Object.prototype;
+	  var SymbolProto = typeof Symbol !== 'undefined' ? Symbol.prototype : null;
+
+	  // Create quick reference variables for speed access to core prototypes.
+	  var push = ArrayProto.push,
+	      slice = ArrayProto.slice,
+	      toString = ObjProto.toString,
+	      hasOwnProperty = ObjProto.hasOwnProperty;
+
+	  // All **ECMAScript 5** native function implementations that we hope to use
+	  // are declared here.
+	  var nativeIsArray = Array.isArray,
+	      nativeKeys = Object.keys,
+	      nativeCreate = Object.create;
+
+	  // Naked function reference for surrogate-prototype-swapping.
+	  var Ctor = function(){};
+
+	  // Create a safe reference to the Underscore object for use below.
+	  var _ = function(obj) {
+	    if (obj instanceof _) return obj;
+	    if (!(this instanceof _)) return new _(obj);
+	    this._wrapped = obj;
+	  };
+
+	  // Export the Underscore object for **Node.js**, with
+	  // backwards-compatibility for their old module API. If we're in
+	  // the browser, add `_` as a global object.
+	  // (`nodeType` is checked to ensure that `module`
+	  // and `exports` are not HTML elements.)
+	  if ( !exports.nodeType) {
+	    if ( !module.nodeType && module.exports) {
+	      exports = module.exports = _;
+	    }
+	    exports._ = _;
+	  } else {
+	    root._ = _;
+	  }
+
+	  // Current version.
+	  _.VERSION = '1.9.2';
+
+	  // Internal function that returns an efficient (for current engines) version
+	  // of the passed-in callback, to be repeatedly applied in other Underscore
+	  // functions.
+	  var optimizeCb = function(func, context, argCount) {
+	    if (context === void 0) return func;
+	    switch (argCount == null ? 3 : argCount) {
+	      case 1: return function(value) {
+	        return func.call(context, value);
+	      };
+	      // The 2-argument case is omitted because we’re not using it.
+	      case 3: return function(value, index, collection) {
+	        return func.call(context, value, index, collection);
+	      };
+	      case 4: return function(accumulator, value, index, collection) {
+	        return func.call(context, accumulator, value, index, collection);
+	      };
+	    }
+	    return function() {
+	      return func.apply(context, arguments);
+	    };
+	  };
+
+	  var builtinIteratee;
+
+	  // An internal function to generate callbacks that can be applied to each
+	  // element in a collection, returning the desired result — either `identity`,
+	  // an arbitrary callback, a property matcher, or a property accessor.
+	  var cb = function(value, context, argCount) {
+	    if (_.iteratee !== builtinIteratee) return _.iteratee(value, context);
+	    if (value == null) return _.identity;
+	    if (_.isFunction(value)) return optimizeCb(value, context, argCount);
+	    if (_.isObject(value) && !_.isArray(value)) return _.matcher(value);
+	    return _.property(value);
+	  };
+
+	  // External wrapper for our callback generator. Users may customize
+	  // `_.iteratee` if they want additional predicate/iteratee shorthand styles.
+	  // This abstraction hides the internal-only argCount argument.
+	  _.iteratee = builtinIteratee = function(value, context) {
+	    return cb(value, context, Infinity);
+	  };
+
+	  // Some functions take a variable number of arguments, or a few expected
+	  // arguments at the beginning and then a variable number of values to operate
+	  // on. This helper accumulates all remaining arguments past the function’s
+	  // argument length (or an explicit `startIndex`), into an array that becomes
+	  // the last argument. Similar to ES6’s "rest parameter".
+	  var restArguments = function(func, startIndex) {
+	    startIndex = startIndex == null ? func.length - 1 : +startIndex;
+	    return function() {
+	      var length = Math.max(arguments.length - startIndex, 0),
+	          rest = Array(length),
+	          index = 0;
+	      for (; index < length; index++) {
+	        rest[index] = arguments[index + startIndex];
+	      }
+	      switch (startIndex) {
+	        case 0: return func.call(this, rest);
+	        case 1: return func.call(this, arguments[0], rest);
+	        case 2: return func.call(this, arguments[0], arguments[1], rest);
+	      }
+	      var args = Array(startIndex + 1);
+	      for (index = 0; index < startIndex; index++) {
+	        args[index] = arguments[index];
+	      }
+	      args[startIndex] = rest;
+	      return func.apply(this, args);
+	    };
+	  };
+
+	  // An internal function for creating a new object that inherits from another.
+	  var baseCreate = function(prototype) {
+	    if (!_.isObject(prototype)) return {};
+	    if (nativeCreate) return nativeCreate(prototype);
+	    Ctor.prototype = prototype;
+	    var result = new Ctor;
+	    Ctor.prototype = null;
+	    return result;
+	  };
+
+	  var shallowProperty = function(key) {
+	    return function(obj) {
+	      return obj == null ? void 0 : obj[key];
+	    };
+	  };
+
+	  var has = function(obj, path) {
+	    return obj != null && hasOwnProperty.call(obj, path);
+	  };
+
+	  var deepGet = function(obj, path) {
+	    var length = path.length;
+	    for (var i = 0; i < length; i++) {
+	      if (obj == null) return void 0;
+	      obj = obj[path[i]];
+	    }
+	    return length ? obj : void 0;
+	  };
+
+	  // Helper for collection methods to determine whether a collection
+	  // should be iterated as an array or as an object.
+	  // Related: https://people.mozilla.org/~jorendorff/es6-draft.html#sec-tolength
+	  // Avoids a very nasty iOS 8 JIT bug on ARM-64. #2094
+	  var MAX_ARRAY_INDEX = Math.pow(2, 53) - 1;
+	  var getLength = shallowProperty('length');
+	  var isArrayLike = function(collection) {
+	    var length = getLength(collection);
+	    return typeof length == 'number' && length >= 0 && length <= MAX_ARRAY_INDEX;
+	  };
+
+	  // Collection Functions
+	  // --------------------
+
+	  // The cornerstone, an `each` implementation, aka `forEach`.
+	  // Handles raw objects in addition to array-likes. Treats all
+	  // sparse array-likes as if they were dense.
+	  _.each = _.forEach = function(obj, iteratee, context) {
+	    iteratee = optimizeCb(iteratee, context);
+	    var i, length;
+	    if (isArrayLike(obj)) {
+	      for (i = 0, length = obj.length; i < length; i++) {
+	        iteratee(obj[i], i, obj);
+	      }
+	    } else {
+	      var keys = _.keys(obj);
+	      for (i = 0, length = keys.length; i < length; i++) {
+	        iteratee(obj[keys[i]], keys[i], obj);
+	      }
+	    }
+	    return obj;
+	  };
+
+	  // Return the results of applying the iteratee to each element.
+	  _.map = _.collect = function(obj, iteratee, context) {
+	    iteratee = cb(iteratee, context);
+	    var keys = !isArrayLike(obj) && _.keys(obj),
+	        length = (keys || obj).length,
+	        results = Array(length);
+	    for (var index = 0; index < length; index++) {
+	      var currentKey = keys ? keys[index] : index;
+	      results[index] = iteratee(obj[currentKey], currentKey, obj);
+	    }
+	    return results;
+	  };
+
+	  // Create a reducing function iterating left or right.
+	  var createReduce = function(dir) {
+	    // Wrap code that reassigns argument variables in a separate function than
+	    // the one that accesses `arguments.length` to avoid a perf hit. (#1991)
+	    var reducer = function(obj, iteratee, memo, initial) {
+	      var keys = !isArrayLike(obj) && _.keys(obj),
+	          length = (keys || obj).length,
+	          index = dir > 0 ? 0 : length - 1;
+	      if (!initial) {
+	        memo = obj[keys ? keys[index] : index];
+	        index += dir;
+	      }
+	      for (; index >= 0 && index < length; index += dir) {
+	        var currentKey = keys ? keys[index] : index;
+	        memo = iteratee(memo, obj[currentKey], currentKey, obj);
+	      }
+	      return memo;
+	    };
+
+	    return function(obj, iteratee, memo, context) {
+	      var initial = arguments.length >= 3;
+	      return reducer(obj, optimizeCb(iteratee, context, 4), memo, initial);
+	    };
+	  };
+
+	  // **Reduce** builds up a single result from a list of values, aka `inject`,
+	  // or `foldl`.
+	  _.reduce = _.foldl = _.inject = createReduce(1);
+
+	  // The right-associative version of reduce, also known as `foldr`.
+	  _.reduceRight = _.foldr = createReduce(-1);
+
+	  // Return the first value which passes a truth test. Aliased as `detect`.
+	  _.find = _.detect = function(obj, predicate, context) {
+	    var keyFinder = isArrayLike(obj) ? _.findIndex : _.findKey;
+	    var key = keyFinder(obj, predicate, context);
+	    if (key !== void 0 && key !== -1) return obj[key];
+	  };
+
+	  // Return all the elements that pass a truth test.
+	  // Aliased as `select`.
+	  _.filter = _.select = function(obj, predicate, context) {
+	    var results = [];
+	    predicate = cb(predicate, context);
+	    _.each(obj, function(value, index, list) {
+	      if (predicate(value, index, list)) results.push(value);
+	    });
+	    return results;
+	  };
+
+	  // Return all the elements for which a truth test fails.
+	  _.reject = function(obj, predicate, context) {
+	    return _.filter(obj, _.negate(cb(predicate)), context);
+	  };
+
+	  // Determine whether all of the elements match a truth test.
+	  // Aliased as `all`.
+	  _.every = _.all = function(obj, predicate, context) {
+	    predicate = cb(predicate, context);
+	    var keys = !isArrayLike(obj) && _.keys(obj),
+	        length = (keys || obj).length;
+	    for (var index = 0; index < length; index++) {
+	      var currentKey = keys ? keys[index] : index;
+	      if (!predicate(obj[currentKey], currentKey, obj)) return false;
+	    }
+	    return true;
+	  };
+
+	  // Determine if at least one element in the object matches a truth test.
+	  // Aliased as `any`.
+	  _.some = _.any = function(obj, predicate, context) {
+	    predicate = cb(predicate, context);
+	    var keys = !isArrayLike(obj) && _.keys(obj),
+	        length = (keys || obj).length;
+	    for (var index = 0; index < length; index++) {
+	      var currentKey = keys ? keys[index] : index;
+	      if (predicate(obj[currentKey], currentKey, obj)) return true;
+	    }
+	    return false;
+	  };
+
+	  // Determine if the array or object contains a given item (using `===`).
+	  // Aliased as `includes` and `include`.
+	  _.contains = _.includes = _.include = function(obj, item, fromIndex, guard) {
+	    if (!isArrayLike(obj)) obj = _.values(obj);
+	    if (typeof fromIndex != 'number' || guard) fromIndex = 0;
+	    return _.indexOf(obj, item, fromIndex) >= 0;
+	  };
+
+	  // Invoke a method (with arguments) on every item in a collection.
+	  _.invoke = restArguments(function(obj, path, args) {
+	    var contextPath, func;
+	    if (_.isFunction(path)) {
+	      func = path;
+	    } else if (_.isArray(path)) {
+	      contextPath = path.slice(0, -1);
+	      path = path[path.length - 1];
+	    }
+	    return _.map(obj, function(context) {
+	      var method = func;
+	      if (!method) {
+	        if (contextPath && contextPath.length) {
+	          context = deepGet(context, contextPath);
+	        }
+	        if (context == null) return void 0;
+	        method = context[path];
+	      }
+	      return method == null ? method : method.apply(context, args);
+	    });
+	  });
+
+	  // Convenience version of a common use case of `map`: fetching a property.
+	  _.pluck = function(obj, key) {
+	    return _.map(obj, _.property(key));
+	  };
+
+	  // Convenience version of a common use case of `filter`: selecting only objects
+	  // containing specific `key:value` pairs.
+	  _.where = function(obj, attrs) {
+	    return _.filter(obj, _.matcher(attrs));
+	  };
+
+	  // Convenience version of a common use case of `find`: getting the first object
+	  // containing specific `key:value` pairs.
+	  _.findWhere = function(obj, attrs) {
+	    return _.find(obj, _.matcher(attrs));
+	  };
+
+	  // Return the maximum element (or element-based computation).
+	  _.max = function(obj, iteratee, context) {
+	    var result = -Infinity, lastComputed = -Infinity,
+	        value, computed;
+	    if (iteratee == null || typeof iteratee == 'number' && typeof obj[0] != 'object' && obj != null) {
+	      obj = isArrayLike(obj) ? obj : _.values(obj);
+	      for (var i = 0, length = obj.length; i < length; i++) {
+	        value = obj[i];
+	        if (value != null && value > result) {
+	          result = value;
+	        }
+	      }
+	    } else {
+	      iteratee = cb(iteratee, context);
+	      _.each(obj, function(v, index, list) {
+	        computed = iteratee(v, index, list);
+	        if (computed > lastComputed || computed === -Infinity && result === -Infinity) {
+	          result = v;
+	          lastComputed = computed;
+	        }
+	      });
+	    }
+	    return result;
+	  };
+
+	  // Return the minimum element (or element-based computation).
+	  _.min = function(obj, iteratee, context) {
+	    var result = Infinity, lastComputed = Infinity,
+	        value, computed;
+	    if (iteratee == null || typeof iteratee == 'number' && typeof obj[0] != 'object' && obj != null) {
+	      obj = isArrayLike(obj) ? obj : _.values(obj);
+	      for (var i = 0, length = obj.length; i < length; i++) {
+	        value = obj[i];
+	        if (value != null && value < result) {
+	          result = value;
+	        }
+	      }
+	    } else {
+	      iteratee = cb(iteratee, context);
+	      _.each(obj, function(v, index, list) {
+	        computed = iteratee(v, index, list);
+	        if (computed < lastComputed || computed === Infinity && result === Infinity) {
+	          result = v;
+	          lastComputed = computed;
+	        }
+	      });
+	    }
+	    return result;
+	  };
+
+	  // Shuffle a collection.
+	  _.shuffle = function(obj) {
+	    return _.sample(obj, Infinity);
+	  };
+
+	  // Sample **n** random values from a collection using the modern version of the
+	  // [Fisher-Yates shuffle](https://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
+	  // If **n** is not specified, returns a single random element.
+	  // The internal `guard` argument allows it to work with `map`.
+	  _.sample = function(obj, n, guard) {
+	    if (n == null || guard) {
+	      if (!isArrayLike(obj)) obj = _.values(obj);
+	      return obj[_.random(obj.length - 1)];
+	    }
+	    var sample = isArrayLike(obj) ? _.clone(obj) : _.values(obj);
+	    var length = getLength(sample);
+	    n = Math.max(Math.min(n, length), 0);
+	    var last = length - 1;
+	    for (var index = 0; index < n; index++) {
+	      var rand = _.random(index, last);
+	      var temp = sample[index];
+	      sample[index] = sample[rand];
+	      sample[rand] = temp;
+	    }
+	    return sample.slice(0, n);
+	  };
+
+	  // Sort the object's values by a criterion produced by an iteratee.
+	  _.sortBy = function(obj, iteratee, context) {
+	    var index = 0;
+	    iteratee = cb(iteratee, context);
+	    return _.pluck(_.map(obj, function(value, key, list) {
+	      return {
+	        value: value,
+	        index: index++,
+	        criteria: iteratee(value, key, list)
+	      };
+	    }).sort(function(left, right) {
+	      var a = left.criteria;
+	      var b = right.criteria;
+	      if (a !== b) {
+	        if (a > b || a === void 0) return 1;
+	        if (a < b || b === void 0) return -1;
+	      }
+	      return left.index - right.index;
+	    }), 'value');
+	  };
+
+	  // An internal function used for aggregate "group by" operations.
+	  var group = function(behavior, partition) {
+	    return function(obj, iteratee, context) {
+	      var result = partition ? [[], []] : {};
+	      iteratee = cb(iteratee, context);
+	      _.each(obj, function(value, index) {
+	        var key = iteratee(value, index, obj);
+	        behavior(result, value, key);
+	      });
+	      return result;
+	    };
+	  };
+
+	  // Groups the object's values by a criterion. Pass either a string attribute
+	  // to group by, or a function that returns the criterion.
+	  _.groupBy = group(function(result, value, key) {
+	    if (has(result, key)) result[key].push(value); else result[key] = [value];
+	  });
+
+	  // Indexes the object's values by a criterion, similar to `groupBy`, but for
+	  // when you know that your index values will be unique.
+	  _.indexBy = group(function(result, value, key) {
+	    result[key] = value;
+	  });
+
+	  // Counts instances of an object that group by a certain criterion. Pass
+	  // either a string attribute to count by, or a function that returns the
+	  // criterion.
+	  _.countBy = group(function(result, value, key) {
+	    if (has(result, key)) result[key]++; else result[key] = 1;
+	  });
+
+	  var reStrSymbol = /[^\ud800-\udfff]|[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g;
+	  // Safely create a real, live array from anything iterable.
+	  _.toArray = function(obj) {
+	    if (!obj) return [];
+	    if (_.isArray(obj)) return slice.call(obj);
+	    if (_.isString(obj)) {
+	      // Keep surrogate pair characters together
+	      return obj.match(reStrSymbol);
+	    }
+	    if (isArrayLike(obj)) return _.map(obj, _.identity);
+	    return _.values(obj);
+	  };
+
+	  // Return the number of elements in an object.
+	  _.size = function(obj) {
+	    if (obj == null) return 0;
+	    return isArrayLike(obj) ? obj.length : _.keys(obj).length;
+	  };
+
+	  // Split a collection into two arrays: one whose elements all satisfy the given
+	  // predicate, and one whose elements all do not satisfy the predicate.
+	  _.partition = group(function(result, value, pass) {
+	    result[pass ? 0 : 1].push(value);
+	  }, true);
+
+	  // Array Functions
+	  // ---------------
+
+	  // Get the first element of an array. Passing **n** will return the first N
+	  // values in the array. Aliased as `head` and `take`. The **guard** check
+	  // allows it to work with `_.map`.
+	  _.first = _.head = _.take = function(array, n, guard) {
+	    if (array == null || array.length < 1) return n == null ? void 0 : [];
+	    if (n == null || guard) return array[0];
+	    return _.initial(array, array.length - n);
+	  };
+
+	  // Returns everything but the last entry of the array. Especially useful on
+	  // the arguments object. Passing **n** will return all the values in
+	  // the array, excluding the last N.
+	  _.initial = function(array, n, guard) {
+	    return slice.call(array, 0, Math.max(0, array.length - (n == null || guard ? 1 : n)));
+	  };
+
+	  // Get the last element of an array. Passing **n** will return the last N
+	  // values in the array.
+	  _.last = function(array, n, guard) {
+	    if (array == null || array.length < 1) return n == null ? void 0 : [];
+	    if (n == null || guard) return array[array.length - 1];
+	    return _.rest(array, Math.max(0, array.length - n));
+	  };
+
+	  // Returns everything but the first entry of the array. Aliased as `tail` and `drop`.
+	  // Especially useful on the arguments object. Passing an **n** will return
+	  // the rest N values in the array.
+	  _.rest = _.tail = _.drop = function(array, n, guard) {
+	    return slice.call(array, n == null || guard ? 1 : n);
+	  };
+
+	  // Trim out all falsy values from an array.
+	  _.compact = function(array) {
+	    return _.filter(array, Boolean);
+	  };
+
+	  // Internal implementation of a recursive `flatten` function.
+	  var flatten = function(input, shallow, strict, output) {
+	    output = output || [];
+	    var idx = output.length;
+	    for (var i = 0, length = getLength(input); i < length; i++) {
+	      var value = input[i];
+	      if (isArrayLike(value) && (_.isArray(value) || _.isArguments(value))) {
+	        // Flatten current level of array or arguments object.
+	        if (shallow) {
+	          var j = 0, len = value.length;
+	          while (j < len) output[idx++] = value[j++];
+	        } else {
+	          flatten(value, shallow, strict, output);
+	          idx = output.length;
+	        }
+	      } else if (!strict) {
+	        output[idx++] = value;
+	      }
+	    }
+	    return output;
+	  };
+
+	  // Flatten out an array, either recursively (by default), or just one level.
+	  _.flatten = function(array, shallow) {
+	    return flatten(array, shallow, false);
+	  };
+
+	  // Return a version of the array that does not contain the specified value(s).
+	  _.without = restArguments(function(array, otherArrays) {
+	    return _.difference(array, otherArrays);
+	  });
+
+	  // Produce a duplicate-free version of the array. If the array has already
+	  // been sorted, you have the option of using a faster algorithm.
+	  // The faster algorithm will not work with an iteratee if the iteratee
+	  // is not a one-to-one function, so providing an iteratee will disable
+	  // the faster algorithm.
+	  // Aliased as `unique`.
+	  _.uniq = _.unique = function(array, isSorted, iteratee, context) {
+	    if (!_.isBoolean(isSorted)) {
+	      context = iteratee;
+	      iteratee = isSorted;
+	      isSorted = false;
+	    }
+	    if (iteratee != null) iteratee = cb(iteratee, context);
+	    var result = [];
+	    var seen = [];
+	    for (var i = 0, length = getLength(array); i < length; i++) {
+	      var value = array[i],
+	          computed = iteratee ? iteratee(value, i, array) : value;
+	      if (isSorted && !iteratee) {
+	        if (!i || seen !== computed) result.push(value);
+	        seen = computed;
+	      } else if (iteratee) {
+	        if (!_.contains(seen, computed)) {
+	          seen.push(computed);
+	          result.push(value);
+	        }
+	      } else if (!_.contains(result, value)) {
+	        result.push(value);
+	      }
+	    }
+	    return result;
+	  };
+
+	  // Produce an array that contains the union: each distinct element from all of
+	  // the passed-in arrays.
+	  _.union = restArguments(function(arrays) {
+	    return _.uniq(flatten(arrays, true, true));
+	  });
+
+	  // Produce an array that contains every item shared between all the
+	  // passed-in arrays.
+	  _.intersection = function(array) {
+	    var result = [];
+	    var argsLength = arguments.length;
+	    for (var i = 0, length = getLength(array); i < length; i++) {
+	      var item = array[i];
+	      if (_.contains(result, item)) continue;
+	      var j;
+	      for (j = 1; j < argsLength; j++) {
+	        if (!_.contains(arguments[j], item)) break;
+	      }
+	      if (j === argsLength) result.push(item);
+	    }
+	    return result;
+	  };
+
+	  // Take the difference between one array and a number of other arrays.
+	  // Only the elements present in just the first array will remain.
+	  _.difference = restArguments(function(array, rest) {
+	    rest = flatten(rest, true, true);
+	    return _.filter(array, function(value){
+	      return !_.contains(rest, value);
+	    });
+	  });
+
+	  // Complement of _.zip. Unzip accepts an array of arrays and groups
+	  // each array's elements on shared indices.
+	  _.unzip = function(array) {
+	    var length = array && _.max(array, getLength).length || 0;
+	    var result = Array(length);
+
+	    for (var index = 0; index < length; index++) {
+	      result[index] = _.pluck(array, index);
+	    }
+	    return result;
+	  };
+
+	  // Zip together multiple lists into a single array -- elements that share
+	  // an index go together.
+	  _.zip = restArguments(_.unzip);
+
+	  // Converts lists into objects. Pass either a single array of `[key, value]`
+	  // pairs, or two parallel arrays of the same length -- one of keys, and one of
+	  // the corresponding values. Passing by pairs is the reverse of _.pairs.
+	  _.object = function(list, values) {
+	    var result = {};
+	    for (var i = 0, length = getLength(list); i < length; i++) {
+	      if (values) {
+	        result[list[i]] = values[i];
+	      } else {
+	        result[list[i][0]] = list[i][1];
+	      }
+	    }
+	    return result;
+	  };
+
+	  // Generator function to create the findIndex and findLastIndex functions.
+	  var createPredicateIndexFinder = function(dir) {
+	    return function(array, predicate, context) {
+	      predicate = cb(predicate, context);
+	      var length = getLength(array);
+	      var index = dir > 0 ? 0 : length - 1;
+	      for (; index >= 0 && index < length; index += dir) {
+	        if (predicate(array[index], index, array)) return index;
+	      }
+	      return -1;
+	    };
+	  };
+
+	  // Returns the first index on an array-like that passes a predicate test.
+	  _.findIndex = createPredicateIndexFinder(1);
+	  _.findLastIndex = createPredicateIndexFinder(-1);
+
+	  // Use a comparator function to figure out the smallest index at which
+	  // an object should be inserted so as to maintain order. Uses binary search.
+	  _.sortedIndex = function(array, obj, iteratee, context) {
+	    iteratee = cb(iteratee, context, 1);
+	    var value = iteratee(obj);
+	    var low = 0, high = getLength(array);
+	    while (low < high) {
+	      var mid = Math.floor((low + high) / 2);
+	      if (iteratee(array[mid]) < value) low = mid + 1; else high = mid;
+	    }
+	    return low;
+	  };
+
+	  // Generator function to create the indexOf and lastIndexOf functions.
+	  var createIndexFinder = function(dir, predicateFind, sortedIndex) {
+	    return function(array, item, idx) {
+	      var i = 0, length = getLength(array);
+	      if (typeof idx == 'number') {
+	        if (dir > 0) {
+	          i = idx >= 0 ? idx : Math.max(idx + length, i);
+	        } else {
+	          length = idx >= 0 ? Math.min(idx + 1, length) : idx + length + 1;
+	        }
+	      } else if (sortedIndex && idx && length) {
+	        idx = sortedIndex(array, item);
+	        return array[idx] === item ? idx : -1;
+	      }
+	      if (item !== item) {
+	        idx = predicateFind(slice.call(array, i, length), _.isNaN);
+	        return idx >= 0 ? idx + i : -1;
+	      }
+	      for (idx = dir > 0 ? i : length - 1; idx >= 0 && idx < length; idx += dir) {
+	        if (array[idx] === item) return idx;
+	      }
+	      return -1;
+	    };
+	  };
+
+	  // Return the position of the first occurrence of an item in an array,
+	  // or -1 if the item is not included in the array.
+	  // If the array is large and already in sort order, pass `true`
+	  // for **isSorted** to use binary search.
+	  _.indexOf = createIndexFinder(1, _.findIndex, _.sortedIndex);
+	  _.lastIndexOf = createIndexFinder(-1, _.findLastIndex);
+
+	  // Generate an integer Array containing an arithmetic progression. A port of
+	  // the native Python `range()` function. See
+	  // [the Python documentation](https://docs.python.org/library/functions.html#range).
+	  _.range = function(start, stop, step) {
+	    if (stop == null) {
+	      stop = start || 0;
+	      start = 0;
+	    }
+	    if (!step) {
+	      step = stop < start ? -1 : 1;
+	    }
+
+	    var length = Math.max(Math.ceil((stop - start) / step), 0);
+	    var range = Array(length);
+
+	    for (var idx = 0; idx < length; idx++, start += step) {
+	      range[idx] = start;
+	    }
+
+	    return range;
+	  };
+
+	  // Chunk a single array into multiple arrays, each containing `count` or fewer
+	  // items.
+	  _.chunk = function(array, count) {
+	    if (count == null || count < 1) return [];
+	    var result = [];
+	    var i = 0, length = array.length;
+	    while (i < length) {
+	      result.push(slice.call(array, i, i += count));
+	    }
+	    return result;
+	  };
+
+	  // Function (ahem) Functions
+	  // ------------------
+
+	  // Determines whether to execute a function as a constructor
+	  // or a normal function with the provided arguments.
+	  var executeBound = function(sourceFunc, boundFunc, context, callingContext, args) {
+	    if (!(callingContext instanceof boundFunc)) return sourceFunc.apply(context, args);
+	    var self = baseCreate(sourceFunc.prototype);
+	    var result = sourceFunc.apply(self, args);
+	    if (_.isObject(result)) return result;
+	    return self;
+	  };
+
+	  // Create a function bound to a given object (assigning `this`, and arguments,
+	  // optionally). Delegates to **ECMAScript 5**'s native `Function.bind` if
+	  // available.
+	  _.bind = restArguments(function(func, context, args) {
+	    if (!_.isFunction(func)) throw new TypeError('Bind must be called on a function');
+	    var bound = restArguments(function(callArgs) {
+	      return executeBound(func, bound, context, this, args.concat(callArgs));
+	    });
+	    return bound;
+	  });
+
+	  // Partially apply a function by creating a version that has had some of its
+	  // arguments pre-filled, without changing its dynamic `this` context. _ acts
+	  // as a placeholder by default, allowing any combination of arguments to be
+	  // pre-filled. Set `_.partial.placeholder` for a custom placeholder argument.
+	  _.partial = restArguments(function(func, boundArgs) {
+	    var placeholder = _.partial.placeholder;
+	    var bound = function() {
+	      var position = 0, length = boundArgs.length;
+	      var args = Array(length);
+	      for (var i = 0; i < length; i++) {
+	        args[i] = boundArgs[i] === placeholder ? arguments[position++] : boundArgs[i];
+	      }
+	      while (position < arguments.length) args.push(arguments[position++]);
+	      return executeBound(func, bound, this, this, args);
+	    };
+	    return bound;
+	  });
+
+	  _.partial.placeholder = _;
+
+	  // Bind a number of an object's methods to that object. Remaining arguments
+	  // are the method names to be bound. Useful for ensuring that all callbacks
+	  // defined on an object belong to it.
+	  _.bindAll = restArguments(function(obj, keys) {
+	    keys = flatten(keys, false, false);
+	    var index = keys.length;
+	    if (index < 1) throw new Error('bindAll must be passed function names');
+	    while (index--) {
+	      var key = keys[index];
+	      obj[key] = _.bind(obj[key], obj);
+	    }
+	  });
+
+	  // Memoize an expensive function by storing its results.
+	  _.memoize = function(func, hasher) {
+	    var memoize = function(key) {
+	      var cache = memoize.cache;
+	      var address = '' + (hasher ? hasher.apply(this, arguments) : key);
+	      if (!has(cache, address)) cache[address] = func.apply(this, arguments);
+	      return cache[address];
+	    };
+	    memoize.cache = {};
+	    return memoize;
+	  };
+
+	  // Delays a function for the given number of milliseconds, and then calls
+	  // it with the arguments supplied.
+	  _.delay = restArguments(function(func, wait, args) {
+	    return setTimeout(function() {
+	      return func.apply(null, args);
+	    }, wait);
+	  });
+
+	  // Defers a function, scheduling it to run after the current call stack has
+	  // cleared.
+	  _.defer = _.partial(_.delay, _, 1);
+
+	  // Returns a function, that, when invoked, will only be triggered at most once
+	  // during a given window of time. Normally, the throttled function will run
+	  // as much as it can, without ever going more than once per `wait` duration;
+	  // but if you'd like to disable the execution on the leading edge, pass
+	  // `{leading: false}`. To disable execution on the trailing edge, ditto.
+	  _.throttle = function(func, wait, options) {
+	    var timeout, context, args, result;
+	    var previous = 0;
+	    if (!options) options = {};
+
+	    var later = function() {
+	      previous = options.leading === false ? 0 : _.now();
+	      timeout = null;
+	      result = func.apply(context, args);
+	      if (!timeout) context = args = null;
+	    };
+
+	    var throttled = function() {
+	      var now = _.now();
+	      if (!previous && options.leading === false) previous = now;
+	      var remaining = wait - (now - previous);
+	      context = this;
+	      args = arguments;
+	      if (remaining <= 0 || remaining > wait) {
+	        if (timeout) {
+	          clearTimeout(timeout);
+	          timeout = null;
+	        }
+	        previous = now;
+	        result = func.apply(context, args);
+	        if (!timeout) context = args = null;
+	      } else if (!timeout && options.trailing !== false) {
+	        timeout = setTimeout(later, remaining);
+	      }
+	      return result;
+	    };
+
+	    throttled.cancel = function() {
+	      clearTimeout(timeout);
+	      previous = 0;
+	      timeout = context = args = null;
+	    };
+
+	    return throttled;
+	  };
+
+	  // Returns a function, that, as long as it continues to be invoked, will not
+	  // be triggered. The function will be called after it stops being called for
+	  // N milliseconds. If `immediate` is passed, trigger the function on the
+	  // leading edge, instead of the trailing.
+	  _.debounce = function(func, wait, immediate) {
+	    var timeout, result;
+
+	    var later = function(context, args) {
+	      timeout = null;
+	      if (args) result = func.apply(context, args);
+	    };
+
+	    var debounced = restArguments(function(args) {
+	      if (timeout) clearTimeout(timeout);
+	      if (immediate) {
+	        var callNow = !timeout;
+	        timeout = setTimeout(later, wait);
+	        if (callNow) result = func.apply(this, args);
+	      } else {
+	        timeout = _.delay(later, wait, this, args);
+	      }
+
+	      return result;
+	    });
+
+	    debounced.cancel = function() {
+	      clearTimeout(timeout);
+	      timeout = null;
+	    };
+
+	    return debounced;
+	  };
+
+	  // Returns the first function passed as an argument to the second,
+	  // allowing you to adjust arguments, run code before and after, and
+	  // conditionally execute the original function.
+	  _.wrap = function(func, wrapper) {
+	    return _.partial(wrapper, func);
+	  };
+
+	  // Returns a negated version of the passed-in predicate.
+	  _.negate = function(predicate) {
+	    return function() {
+	      return !predicate.apply(this, arguments);
+	    };
+	  };
+
+	  // Returns a function that is the composition of a list of functions, each
+	  // consuming the return value of the function that follows.
+	  _.compose = function() {
+	    var args = arguments;
+	    var start = args.length - 1;
+	    return function() {
+	      var i = start;
+	      var result = args[start].apply(this, arguments);
+	      while (i--) result = args[i].call(this, result);
+	      return result;
+	    };
+	  };
+
+	  // Returns a function that will only be executed on and after the Nth call.
+	  _.after = function(times, func) {
+	    return function() {
+	      if (--times < 1) {
+	        return func.apply(this, arguments);
+	      }
+	    };
+	  };
+
+	  // Returns a function that will only be executed up to (but not including) the Nth call.
+	  _.before = function(times, func) {
+	    var memo;
+	    return function() {
+	      if (--times > 0) {
+	        memo = func.apply(this, arguments);
+	      }
+	      if (times <= 1) func = null;
+	      return memo;
+	    };
+	  };
+
+	  // Returns a function that will be executed at most one time, no matter how
+	  // often you call it. Useful for lazy initialization.
+	  _.once = _.partial(_.before, 2);
+
+	  _.restArguments = restArguments;
+
+	  // Object Functions
+	  // ----------------
+
+	  // Keys in IE < 9 that won't be iterated by `for key in ...` and thus missed.
+	  var hasEnumBug = !{toString: null}.propertyIsEnumerable('toString');
+	  var nonEnumerableProps = ['valueOf', 'isPrototypeOf', 'toString',
+	    'propertyIsEnumerable', 'hasOwnProperty', 'toLocaleString'];
+
+	  var collectNonEnumProps = function(obj, keys) {
+	    var nonEnumIdx = nonEnumerableProps.length;
+	    var constructor = obj.constructor;
+	    var proto = _.isFunction(constructor) && constructor.prototype || ObjProto;
+
+	    // Constructor is a special case.
+	    var prop = 'constructor';
+	    if (has(obj, prop) && !_.contains(keys, prop)) keys.push(prop);
+
+	    while (nonEnumIdx--) {
+	      prop = nonEnumerableProps[nonEnumIdx];
+	      if (prop in obj && obj[prop] !== proto[prop] && !_.contains(keys, prop)) {
+	        keys.push(prop);
+	      }
+	    }
+	  };
+
+	  // Retrieve the names of an object's own properties.
+	  // Delegates to **ECMAScript 5**'s native `Object.keys`.
+	  _.keys = function(obj) {
+	    if (!_.isObject(obj)) return [];
+	    if (nativeKeys) return nativeKeys(obj);
+	    var keys = [];
+	    for (var key in obj) if (has(obj, key)) keys.push(key);
+	    // Ahem, IE < 9.
+	    if (hasEnumBug) collectNonEnumProps(obj, keys);
+	    return keys;
+	  };
+
+	  // Retrieve all the property names of an object.
+	  _.allKeys = function(obj) {
+	    if (!_.isObject(obj)) return [];
+	    var keys = [];
+	    for (var key in obj) keys.push(key);
+	    // Ahem, IE < 9.
+	    if (hasEnumBug) collectNonEnumProps(obj, keys);
+	    return keys;
+	  };
+
+	  // Retrieve the values of an object's properties.
+	  _.values = function(obj) {
+	    var keys = _.keys(obj);
+	    var length = keys.length;
+	    var values = Array(length);
+	    for (var i = 0; i < length; i++) {
+	      values[i] = obj[keys[i]];
+	    }
+	    return values;
+	  };
+
+	  // Returns the results of applying the iteratee to each element of the object.
+	  // In contrast to _.map it returns an object.
+	  _.mapObject = function(obj, iteratee, context) {
+	    iteratee = cb(iteratee, context);
+	    var keys = _.keys(obj),
+	        length = keys.length,
+	        results = {};
+	    for (var index = 0; index < length; index++) {
+	      var currentKey = keys[index];
+	      results[currentKey] = iteratee(obj[currentKey], currentKey, obj);
+	    }
+	    return results;
+	  };
+
+	  // Convert an object into a list of `[key, value]` pairs.
+	  // The opposite of _.object.
+	  _.pairs = function(obj) {
+	    var keys = _.keys(obj);
+	    var length = keys.length;
+	    var pairs = Array(length);
+	    for (var i = 0; i < length; i++) {
+	      pairs[i] = [keys[i], obj[keys[i]]];
+	    }
+	    return pairs;
+	  };
+
+	  // Invert the keys and values of an object. The values must be serializable.
+	  _.invert = function(obj) {
+	    var result = {};
+	    var keys = _.keys(obj);
+	    for (var i = 0, length = keys.length; i < length; i++) {
+	      result[obj[keys[i]]] = keys[i];
+	    }
+	    return result;
+	  };
+
+	  // Return a sorted list of the function names available on the object.
+	  // Aliased as `methods`.
+	  _.functions = _.methods = function(obj) {
+	    var names = [];
+	    for (var key in obj) {
+	      if (_.isFunction(obj[key])) names.push(key);
+	    }
+	    return names.sort();
+	  };
+
+	  // An internal function for creating assigner functions.
+	  var createAssigner = function(keysFunc, defaults) {
+	    return function(obj) {
+	      var length = arguments.length;
+	      if (defaults) obj = Object(obj);
+	      if (length < 2 || obj == null) return obj;
+	      for (var index = 1; index < length; index++) {
+	        var source = arguments[index],
+	            keys = keysFunc(source),
+	            l = keys.length;
+	        for (var i = 0; i < l; i++) {
+	          var key = keys[i];
+	          if (!defaults || obj[key] === void 0) obj[key] = source[key];
+	        }
+	      }
+	      return obj;
+	    };
+	  };
+
+	  // Extend a given object with all the properties in passed-in object(s).
+	  _.extend = createAssigner(_.allKeys);
+
+	  // Assigns a given object with all the own properties in the passed-in object(s).
+	  // (https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/assign)
+	  _.extendOwn = _.assign = createAssigner(_.keys);
+
+	  // Returns the first key on an object that passes a predicate test.
+	  _.findKey = function(obj, predicate, context) {
+	    predicate = cb(predicate, context);
+	    var keys = _.keys(obj), key;
+	    for (var i = 0, length = keys.length; i < length; i++) {
+	      key = keys[i];
+	      if (predicate(obj[key], key, obj)) return key;
+	    }
+	  };
+
+	  // Internal pick helper function to determine if `obj` has key `key`.
+	  var keyInObj = function(value, key, obj) {
+	    return key in obj;
+	  };
+
+	  // Return a copy of the object only containing the whitelisted properties.
+	  _.pick = restArguments(function(obj, keys) {
+	    var result = {}, iteratee = keys[0];
+	    if (obj == null) return result;
+	    if (_.isFunction(iteratee)) {
+	      if (keys.length > 1) iteratee = optimizeCb(iteratee, keys[1]);
+	      keys = _.allKeys(obj);
+	    } else {
+	      iteratee = keyInObj;
+	      keys = flatten(keys, false, false);
+	      obj = Object(obj);
+	    }
+	    for (var i = 0, length = keys.length; i < length; i++) {
+	      var key = keys[i];
+	      var value = obj[key];
+	      if (iteratee(value, key, obj)) result[key] = value;
+	    }
+	    return result;
+	  });
+
+	  // Return a copy of the object without the blacklisted properties.
+	  _.omit = restArguments(function(obj, keys) {
+	    var iteratee = keys[0], context;
+	    if (_.isFunction(iteratee)) {
+	      iteratee = _.negate(iteratee);
+	      if (keys.length > 1) context = keys[1];
+	    } else {
+	      keys = _.map(flatten(keys, false, false), String);
+	      iteratee = function(value, key) {
+	        return !_.contains(keys, key);
+	      };
+	    }
+	    return _.pick(obj, iteratee, context);
+	  });
+
+	  // Fill in a given object with default properties.
+	  _.defaults = createAssigner(_.allKeys, true);
+
+	  // Creates an object that inherits from the given prototype object.
+	  // If additional properties are provided then they will be added to the
+	  // created object.
+	  _.create = function(prototype, props) {
+	    var result = baseCreate(prototype);
+	    if (props) _.extendOwn(result, props);
+	    return result;
+	  };
+
+	  // Create a (shallow-cloned) duplicate of an object.
+	  _.clone = function(obj) {
+	    if (!_.isObject(obj)) return obj;
+	    return _.isArray(obj) ? obj.slice() : _.extend({}, obj);
+	  };
+
+	  // Invokes interceptor with the obj, and then returns obj.
+	  // The primary purpose of this method is to "tap into" a method chain, in
+	  // order to perform operations on intermediate results within the chain.
+	  _.tap = function(obj, interceptor) {
+	    interceptor(obj);
+	    return obj;
+	  };
+
+	  // Returns whether an object has a given set of `key:value` pairs.
+	  _.isMatch = function(object, attrs) {
+	    var keys = _.keys(attrs), length = keys.length;
+	    if (object == null) return !length;
+	    var obj = Object(object);
+	    for (var i = 0; i < length; i++) {
+	      var key = keys[i];
+	      if (attrs[key] !== obj[key] || !(key in obj)) return false;
+	    }
+	    return true;
+	  };
+
+
+	  // Internal recursive comparison function for `isEqual`.
+	  var eq, deepEq;
+	  eq = function(a, b, aStack, bStack) {
+	    // Identical objects are equal. `0 === -0`, but they aren't identical.
+	    // See the [Harmony `egal` proposal](https://wiki.ecmascript.org/doku.php?id=harmony:egal).
+	    if (a === b) return a !== 0 || 1 / a === 1 / b;
+	    // `null` or `undefined` only equal to itself (strict comparison).
+	    if (a == null || b == null) return false;
+	    // `NaN`s are equivalent, but non-reflexive.
+	    if (a !== a) return b !== b;
+	    // Exhaust primitive checks
+	    var type = typeof a;
+	    if (type !== 'function' && type !== 'object' && typeof b != 'object') return false;
+	    return deepEq(a, b, aStack, bStack);
+	  };
+
+	  // Internal recursive comparison function for `isEqual`.
+	  deepEq = function(a, b, aStack, bStack) {
+	    // Unwrap any wrapped objects.
+	    if (a instanceof _) a = a._wrapped;
+	    if (b instanceof _) b = b._wrapped;
+	    // Compare `[[Class]]` names.
+	    var className = toString.call(a);
+	    if (className !== toString.call(b)) return false;
+	    switch (className) {
+	      // Strings, numbers, regular expressions, dates, and booleans are compared by value.
+	      case '[object RegExp]':
+	      // RegExps are coerced to strings for comparison (Note: '' + /a/i === '/a/i')
+	      case '[object String]':
+	        // Primitives and their corresponding object wrappers are equivalent; thus, `"5"` is
+	        // equivalent to `new String("5")`.
+	        return '' + a === '' + b;
+	      case '[object Number]':
+	        // `NaN`s are equivalent, but non-reflexive.
+	        // Object(NaN) is equivalent to NaN.
+	        if (+a !== +a) return +b !== +b;
+	        // An `egal` comparison is performed for other numeric values.
+	        return +a === 0 ? 1 / +a === 1 / b : +a === +b;
+	      case '[object Date]':
+	      case '[object Boolean]':
+	        // Coerce dates and booleans to numeric primitive values. Dates are compared by their
+	        // millisecond representations. Note that invalid dates with millisecond representations
+	        // of `NaN` are not equivalent.
+	        return +a === +b;
+	      case '[object Symbol]':
+	        return SymbolProto.valueOf.call(a) === SymbolProto.valueOf.call(b);
+	    }
+
+	    var areArrays = className === '[object Array]';
+	    if (!areArrays) {
+	      if (typeof a != 'object' || typeof b != 'object') return false;
+
+	      // Objects with different constructors are not equivalent, but `Object`s or `Array`s
+	      // from different frames are.
+	      var aCtor = a.constructor, bCtor = b.constructor;
+	      if (aCtor !== bCtor && !(_.isFunction(aCtor) && aCtor instanceof aCtor &&
+	                               _.isFunction(bCtor) && bCtor instanceof bCtor)
+	                          && ('constructor' in a && 'constructor' in b)) {
+	        return false;
+	      }
+	    }
+	    // Assume equality for cyclic structures. The algorithm for detecting cyclic
+	    // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
+
+	    // Initializing stack of traversed objects.
+	    // It's done here since we only need them for objects and arrays comparison.
+	    aStack = aStack || [];
+	    bStack = bStack || [];
+	    var length = aStack.length;
+	    while (length--) {
+	      // Linear search. Performance is inversely proportional to the number of
+	      // unique nested structures.
+	      if (aStack[length] === a) return bStack[length] === b;
+	    }
+
+	    // Add the first object to the stack of traversed objects.
+	    aStack.push(a);
+	    bStack.push(b);
+
+	    // Recursively compare objects and arrays.
+	    if (areArrays) {
+	      // Compare array lengths to determine if a deep comparison is necessary.
+	      length = a.length;
+	      if (length !== b.length) return false;
+	      // Deep compare the contents, ignoring non-numeric properties.
+	      while (length--) {
+	        if (!eq(a[length], b[length], aStack, bStack)) return false;
+	      }
+	    } else {
+	      // Deep compare objects.
+	      var keys = _.keys(a), key;
+	      length = keys.length;
+	      // Ensure that both objects contain the same number of properties before comparing deep equality.
+	      if (_.keys(b).length !== length) return false;
+	      while (length--) {
+	        // Deep compare each member
+	        key = keys[length];
+	        if (!(has(b, key) && eq(a[key], b[key], aStack, bStack))) return false;
+	      }
+	    }
+	    // Remove the first object from the stack of traversed objects.
+	    aStack.pop();
+	    bStack.pop();
+	    return true;
+	  };
+
+	  // Perform a deep comparison to check if two objects are equal.
+	  _.isEqual = function(a, b) {
+	    return eq(a, b);
+	  };
+
+	  // Is a given array, string, or object empty?
+	  // An "empty" object has no enumerable own-properties.
+	  _.isEmpty = function(obj) {
+	    if (obj == null) return true;
+	    if (isArrayLike(obj) && (_.isArray(obj) || _.isString(obj) || _.isArguments(obj))) return obj.length === 0;
+	    return _.keys(obj).length === 0;
+	  };
+
+	  // Is a given value a DOM element?
+	  _.isElement = function(obj) {
+	    return !!(obj && obj.nodeType === 1);
+	  };
+
+	  // Is a given value an array?
+	  // Delegates to ECMA5's native Array.isArray
+	  _.isArray = nativeIsArray || function(obj) {
+	    return toString.call(obj) === '[object Array]';
+	  };
+
+	  // Is a given variable an object?
+	  _.isObject = function(obj) {
+	    var type = typeof obj;
+	    return type === 'function' || type === 'object' && !!obj;
+	  };
+
+	  // Add some isType methods: isArguments, isFunction, isString, isNumber, isDate, isRegExp, isError, isMap, isWeakMap, isSet, isWeakSet.
+	  _.each(['Arguments', 'Function', 'String', 'Number', 'Date', 'RegExp', 'Error', 'Symbol', 'Map', 'WeakMap', 'Set', 'WeakSet'], function(name) {
+	    _['is' + name] = function(obj) {
+	      return toString.call(obj) === '[object ' + name + ']';
+	    };
+	  });
+
+	  // Define a fallback version of the method in browsers (ahem, IE < 9), where
+	  // there isn't any inspectable "Arguments" type.
+	  if (!_.isArguments(arguments)) {
+	    _.isArguments = function(obj) {
+	      return has(obj, 'callee');
+	    };
+	  }
+
+	  // Optimize `isFunction` if appropriate. Work around some typeof bugs in old v8,
+	  // IE 11 (#1621), Safari 8 (#1929), and PhantomJS (#2236).
+	  var nodelist = root.document && root.document.childNodes;
+	  if (typeof /./ != 'function' && typeof Int8Array != 'object' && typeof nodelist != 'function') {
+	    _.isFunction = function(obj) {
+	      return typeof obj == 'function' || false;
+	    };
+	  }
+
+	  // Is a given object a finite number?
+	  _.isFinite = function(obj) {
+	    return !_.isSymbol(obj) && isFinite(obj) && !isNaN(parseFloat(obj));
+	  };
+
+	  // Is the given value `NaN`?
+	  _.isNaN = function(obj) {
+	    return _.isNumber(obj) && isNaN(obj);
+	  };
+
+	  // Is a given value a boolean?
+	  _.isBoolean = function(obj) {
+	    return obj === true || obj === false || toString.call(obj) === '[object Boolean]';
+	  };
+
+	  // Is a given value equal to null?
+	  _.isNull = function(obj) {
+	    return obj === null;
+	  };
+
+	  // Is a given variable undefined?
+	  _.isUndefined = function(obj) {
+	    return obj === void 0;
+	  };
+
+	  // Shortcut function for checking if an object has a given property directly
+	  // on itself (in other words, not on a prototype).
+	  _.has = function(obj, path) {
+	    if (!_.isArray(path)) {
+	      return has(obj, path);
+	    }
+	    var length = path.length;
+	    for (var i = 0; i < length; i++) {
+	      var key = path[i];
+	      if (obj == null || !hasOwnProperty.call(obj, key)) {
+	        return false;
+	      }
+	      obj = obj[key];
+	    }
+	    return !!length;
+	  };
+
+	  // Utility Functions
+	  // -----------------
+
+	  // Run Underscore.js in *noConflict* mode, returning the `_` variable to its
+	  // previous owner. Returns a reference to the Underscore object.
+	  _.noConflict = function() {
+	    root._ = previousUnderscore;
+	    return this;
+	  };
+
+	  // Keep the identity function around for default iteratees.
+	  _.identity = function(value) {
+	    return value;
+	  };
+
+	  // Predicate-generating functions. Often useful outside of Underscore.
+	  _.constant = function(value) {
+	    return function() {
+	      return value;
+	    };
+	  };
+
+	  _.noop = function(){};
+
+	  // Creates a function that, when passed an object, will traverse that object’s
+	  // properties down the given `path`, specified as an array of keys or indexes.
+	  _.property = function(path) {
+	    if (!_.isArray(path)) {
+	      return shallowProperty(path);
+	    }
+	    return function(obj) {
+	      return deepGet(obj, path);
+	    };
+	  };
+
+	  // Generates a function for a given object that returns a given property.
+	  _.propertyOf = function(obj) {
+	    if (obj == null) {
+	      return function(){};
+	    }
+	    return function(path) {
+	      return !_.isArray(path) ? obj[path] : deepGet(obj, path);
+	    };
+	  };
+
+	  // Returns a predicate for checking whether an object has a given set of
+	  // `key:value` pairs.
+	  _.matcher = _.matches = function(attrs) {
+	    attrs = _.extendOwn({}, attrs);
+	    return function(obj) {
+	      return _.isMatch(obj, attrs);
+	    };
+	  };
+
+	  // Run a function **n** times.
+	  _.times = function(n, iteratee, context) {
+	    var accum = Array(Math.max(0, n));
+	    iteratee = optimizeCb(iteratee, context, 1);
+	    for (var i = 0; i < n; i++) accum[i] = iteratee(i);
+	    return accum;
+	  };
+
+	  // Return a random integer between min and max (inclusive).
+	  _.random = function(min, max) {
+	    if (max == null) {
+	      max = min;
+	      min = 0;
+	    }
+	    return min + Math.floor(Math.random() * (max - min + 1));
+	  };
+
+	  // A (possibly faster) way to get the current timestamp as an integer.
+	  _.now = Date.now || function() {
+	    return new Date().getTime();
+	  };
+
+	  // List of HTML entities for escaping.
+	  var escapeMap = {
+	    '&': '&amp;',
+	    '<': '&lt;',
+	    '>': '&gt;',
+	    '"': '&quot;',
+	    "'": '&#x27;',
+	    '`': '&#x60;'
+	  };
+	  var unescapeMap = _.invert(escapeMap);
+
+	  // Functions for escaping and unescaping strings to/from HTML interpolation.
+	  var createEscaper = function(map) {
+	    var escaper = function(match) {
+	      return map[match];
+	    };
+	    // Regexes for identifying a key that needs to be escaped.
+	    var source = '(?:' + _.keys(map).join('|') + ')';
+	    var testRegexp = RegExp(source);
+	    var replaceRegexp = RegExp(source, 'g');
+	    return function(string) {
+	      string = string == null ? '' : '' + string;
+	      return testRegexp.test(string) ? string.replace(replaceRegexp, escaper) : string;
+	    };
+	  };
+	  _.escape = createEscaper(escapeMap);
+	  _.unescape = createEscaper(unescapeMap);
+
+	  // Traverses the children of `obj` along `path`. If a child is a function, it
+	  // is invoked with its parent as context. Returns the value of the final
+	  // child, or `fallback` if any child is undefined.
+	  _.result = function(obj, path, fallback) {
+	    if (!_.isArray(path)) path = [path];
+	    var length = path.length;
+	    if (!length) {
+	      return _.isFunction(fallback) ? fallback.call(obj) : fallback;
+	    }
+	    for (var i = 0; i < length; i++) {
+	      var prop = obj == null ? void 0 : obj[path[i]];
+	      if (prop === void 0) {
+	        prop = fallback;
+	        i = length; // Ensure we don't continue iterating.
+	      }
+	      obj = _.isFunction(prop) ? prop.call(obj) : prop;
+	    }
+	    return obj;
+	  };
+
+	  // Generate a unique integer id (unique within the entire client session).
+	  // Useful for temporary DOM ids.
+	  var idCounter = 0;
+	  _.uniqueId = function(prefix) {
+	    var id = ++idCounter + '';
+	    return prefix ? prefix + id : id;
+	  };
+
+	  // By default, Underscore uses ERB-style template delimiters, change the
+	  // following template settings to use alternative delimiters.
+	  _.templateSettings = {
+	    evaluate: /<%([\s\S]+?)%>/g,
+	    interpolate: /<%=([\s\S]+?)%>/g,
+	    escape: /<%-([\s\S]+?)%>/g
+	  };
+
+	  // When customizing `templateSettings`, if you don't want to define an
+	  // interpolation, evaluation or escaping regex, we need one that is
+	  // guaranteed not to match.
+	  var noMatch = /(.)^/;
+
+	  // Certain characters need to be escaped so that they can be put into a
+	  // string literal.
+	  var escapes = {
+	    "'": "'",
+	    '\\': '\\',
+	    '\r': 'r',
+	    '\n': 'n',
+	    '\u2028': 'u2028',
+	    '\u2029': 'u2029'
+	  };
+
+	  var escapeRegExp = /\\|'|\r|\n|\u2028|\u2029/g;
+
+	  var escapeChar = function(match) {
+	    return '\\' + escapes[match];
+	  };
+
+	  // JavaScript micro-templating, similar to John Resig's implementation.
+	  // Underscore templating handles arbitrary delimiters, preserves whitespace,
+	  // and correctly escapes quotes within interpolated code.
+	  // NB: `oldSettings` only exists for backwards compatibility.
+	  _.template = function(text, settings, oldSettings) {
+	    if (!settings && oldSettings) settings = oldSettings;
+	    settings = _.defaults({}, settings, _.templateSettings);
+
+	    // Combine delimiters into one regular expression via alternation.
+	    var matcher = RegExp([
+	      (settings.escape || noMatch).source,
+	      (settings.interpolate || noMatch).source,
+	      (settings.evaluate || noMatch).source
+	    ].join('|') + '|$', 'g');
+
+	    // Compile the template source, escaping string literals appropriately.
+	    var index = 0;
+	    var source = "__p+='";
+	    text.replace(matcher, function(match, escape, interpolate, evaluate, offset) {
+	      source += text.slice(index, offset).replace(escapeRegExp, escapeChar);
+	      index = offset + match.length;
+
+	      if (escape) {
+	        source += "'+\n((__t=(" + escape + "))==null?'':_.escape(__t))+\n'";
+	      } else if (interpolate) {
+	        source += "'+\n((__t=(" + interpolate + "))==null?'':__t)+\n'";
+	      } else if (evaluate) {
+	        source += "';\n" + evaluate + "\n__p+='";
+	      }
+
+	      // Adobe VMs need the match returned to produce the correct offset.
+	      return match;
+	    });
+	    source += "';\n";
+
+	    // If a variable is not specified, place data values in local scope.
+	    if (!settings.variable) source = 'with(obj||{}){\n' + source + '}\n';
+
+	    source = "var __t,__p='',__j=Array.prototype.join," +
+	      "print=function(){__p+=__j.call(arguments,'');};\n" +
+	      source + 'return __p;\n';
+
+	    var render;
+	    try {
+	      render = new Function(settings.variable || 'obj', '_', source);
+	    } catch (e) {
+	      e.source = source;
+	      throw e;
+	    }
+
+	    var template = function(data) {
+	      return render.call(this, data, _);
+	    };
+
+	    // Provide the compiled source as a convenience for precompilation.
+	    var argument = settings.variable || 'obj';
+	    template.source = 'function(' + argument + '){\n' + source + '}';
+
+	    return template;
+	  };
+
+	  // Add a "chain" function. Start chaining a wrapped Underscore object.
+	  _.chain = function(obj) {
+	    var instance = _(obj);
+	    instance._chain = true;
+	    return instance;
+	  };
+
+	  // OOP
+	  // ---------------
+	  // If Underscore is called as a function, it returns a wrapped object that
+	  // can be used OO-style. This wrapper holds altered versions of all the
+	  // underscore functions. Wrapped objects may be chained.
+
+	  // Helper function to continue chaining intermediate results.
+	  var chainResult = function(instance, obj) {
+	    return instance._chain ? _(obj).chain() : obj;
+	  };
+
+	  // Add your own custom functions to the Underscore object.
+	  _.mixin = function(obj) {
+	    _.each(_.functions(obj), function(name) {
+	      var func = _[name] = obj[name];
+	      _.prototype[name] = function() {
+	        var args = [this._wrapped];
+	        push.apply(args, arguments);
+	        return chainResult(this, func.apply(_, args));
+	      };
+	    });
+	    return _;
+	  };
+
+	  // Add all of the Underscore functions to the wrapper object.
+	  _.mixin(_);
+
+	  // Add all mutator Array functions to the wrapper.
+	  _.each(['pop', 'push', 'reverse', 'shift', 'sort', 'splice', 'unshift'], function(name) {
+	    var method = ArrayProto[name];
+	    _.prototype[name] = function() {
+	      var obj = this._wrapped;
+	      method.apply(obj, arguments);
+	      if ((name === 'shift' || name === 'splice') && obj.length === 0) delete obj[0];
+	      return chainResult(this, obj);
+	    };
+	  });
+
+	  // Add all accessor Array functions to the wrapper.
+	  _.each(['concat', 'join', 'slice'], function(name) {
+	    var method = ArrayProto[name];
+	    _.prototype[name] = function() {
+	      return chainResult(this, method.apply(this._wrapped, arguments));
+	    };
+	  });
+
+	  // Extracts the result from a wrapped and chained object.
+	  _.prototype.value = function() {
+	    return this._wrapped;
+	  };
+
+	  // Provide unwrapping proxy for some methods used in engine operations
+	  // such as arithmetic and JSON stringification.
+	  _.prototype.valueOf = _.prototype.toJSON = _.prototype.value;
+
+	  _.prototype.toString = function() {
+	    return String(this._wrapped);
+	  };
+	}());
+	});
+	var underscore_1 = underscore._;
+
+	var bind = function bind(fn, thisArg) {
+	  return function wrap() {
+	    var args = new Array(arguments.length);
+	    for (var i = 0; i < args.length; i++) {
+	      args[i] = arguments[i];
+	    }
+	    return fn.apply(thisArg, args);
+	  };
+	};
+
+	/*global toString:true*/
+
+	// utils is a library of generic helper functions non-specific to axios
+
+	var toString = Object.prototype.toString;
+
+	/**
+	 * Determine if a value is an Array
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is an Array, otherwise false
+	 */
+	function isArray(val) {
+	  return toString.call(val) === '[object Array]';
+	}
+
+	/**
+	 * Determine if a value is undefined
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if the value is undefined, otherwise false
+	 */
+	function isUndefined(val) {
+	  return typeof val === 'undefined';
+	}
+
+	/**
+	 * Determine if a value is a Buffer
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a Buffer, otherwise false
+	 */
+	function isBuffer(val) {
+	  return val !== null && !isUndefined(val) && val.constructor !== null && !isUndefined(val.constructor)
+	    && typeof val.constructor.isBuffer === 'function' && val.constructor.isBuffer(val);
+	}
+
+	/**
+	 * Determine if a value is an ArrayBuffer
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is an ArrayBuffer, otherwise false
+	 */
+	function isArrayBuffer(val) {
+	  return toString.call(val) === '[object ArrayBuffer]';
+	}
+
+	/**
+	 * Determine if a value is a FormData
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is an FormData, otherwise false
+	 */
+	function isFormData(val) {
+	  return (typeof FormData !== 'undefined') && (val instanceof FormData);
+	}
+
+	/**
+	 * Determine if a value is a view on an ArrayBuffer
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a view on an ArrayBuffer, otherwise false
+	 */
+	function isArrayBufferView(val) {
+	  var result;
+	  if ((typeof ArrayBuffer !== 'undefined') && (ArrayBuffer.isView)) {
+	    result = ArrayBuffer.isView(val);
+	  } else {
+	    result = (val) && (val.buffer) && (val.buffer instanceof ArrayBuffer);
+	  }
+	  return result;
+	}
+
+	/**
+	 * Determine if a value is a String
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a String, otherwise false
+	 */
+	function isString(val) {
+	  return typeof val === 'string';
+	}
+
+	/**
+	 * Determine if a value is a Number
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a Number, otherwise false
+	 */
+	function isNumber(val) {
+	  return typeof val === 'number';
+	}
+
+	/**
+	 * Determine if a value is an Object
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is an Object, otherwise false
+	 */
+	function isObject(val) {
+	  return val !== null && typeof val === 'object';
+	}
+
+	/**
+	 * Determine if a value is a Date
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a Date, otherwise false
+	 */
+	function isDate(val) {
+	  return toString.call(val) === '[object Date]';
+	}
+
+	/**
+	 * Determine if a value is a File
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a File, otherwise false
+	 */
+	function isFile(val) {
+	  return toString.call(val) === '[object File]';
+	}
+
+	/**
+	 * Determine if a value is a Blob
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a Blob, otherwise false
+	 */
+	function isBlob(val) {
+	  return toString.call(val) === '[object Blob]';
+	}
+
+	/**
+	 * Determine if a value is a Function
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a Function, otherwise false
+	 */
+	function isFunction$1(val) {
+	  return toString.call(val) === '[object Function]';
+	}
+
+	/**
+	 * Determine if a value is a Stream
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a Stream, otherwise false
+	 */
+	function isStream(val) {
+	  return isObject(val) && isFunction$1(val.pipe);
+	}
+
+	/**
+	 * Determine if a value is a URLSearchParams object
+	 *
+	 * @param {Object} val The value to test
+	 * @returns {boolean} True if value is a URLSearchParams object, otherwise false
+	 */
+	function isURLSearchParams(val) {
+	  return typeof URLSearchParams !== 'undefined' && val instanceof URLSearchParams;
+	}
+
+	/**
+	 * Trim excess whitespace off the beginning and end of a string
+	 *
+	 * @param {String} str The String to trim
+	 * @returns {String} The String freed of excess whitespace
+	 */
+	function trim(str) {
+	  return str.replace(/^\s*/, '').replace(/\s*$/, '');
+	}
+
+	/**
+	 * Determine if we're running in a standard browser environment
+	 *
+	 * This allows axios to run in a web worker, and react-native.
+	 * Both environments support XMLHttpRequest, but not fully standard globals.
+	 *
+	 * web workers:
+	 *  typeof window -> undefined
+	 *  typeof document -> undefined
+	 *
+	 * react-native:
+	 *  navigator.product -> 'ReactNative'
+	 * nativescript
+	 *  navigator.product -> 'NativeScript' or 'NS'
+	 */
+	function isStandardBrowserEnv() {
+	  if (typeof navigator !== 'undefined' && (navigator.product === 'ReactNative' ||
+	                                           navigator.product === 'NativeScript' ||
+	                                           navigator.product === 'NS')) {
+	    return false;
+	  }
+	  return (
+	    typeof window !== 'undefined' &&
+	    typeof document !== 'undefined'
+	  );
+	}
+
+	/**
+	 * Iterate over an Array or an Object invoking a function for each item.
+	 *
+	 * If `obj` is an Array callback will be called passing
+	 * the value, index, and complete array for each item.
+	 *
+	 * If 'obj' is an Object callback will be called passing
+	 * the value, key, and complete object for each property.
+	 *
+	 * @param {Object|Array} obj The object to iterate
+	 * @param {Function} fn The callback to invoke for each item
+	 */
+	function forEach(obj, fn) {
+	  // Don't bother if no value provided
+	  if (obj === null || typeof obj === 'undefined') {
+	    return;
+	  }
+
+	  // Force an array if not already something iterable
+	  if (typeof obj !== 'object') {
+	    /*eslint no-param-reassign:0*/
+	    obj = [obj];
+	  }
+
+	  if (isArray(obj)) {
+	    // Iterate over array values
+	    for (var i = 0, l = obj.length; i < l; i++) {
+	      fn.call(null, obj[i], i, obj);
+	    }
+	  } else {
+	    // Iterate over object keys
+	    for (var key in obj) {
+	      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+	        fn.call(null, obj[key], key, obj);
+	      }
+	    }
+	  }
+	}
+
+	/**
+	 * Accepts varargs expecting each argument to be an object, then
+	 * immutably merges the properties of each object and returns result.
+	 *
+	 * When multiple objects contain the same key the later object in
+	 * the arguments list will take precedence.
+	 *
+	 * Example:
+	 *
+	 * ```js
+	 * var result = merge({foo: 123}, {foo: 456});
+	 * console.log(result.foo); // outputs 456
+	 * ```
+	 *
+	 * @param {Object} obj1 Object to merge
+	 * @returns {Object} Result of all merge properties
+	 */
+	function merge(/* obj1, obj2, obj3, ... */) {
+	  var result = {};
+	  function assignValue(val, key) {
+	    if (typeof result[key] === 'object' && typeof val === 'object') {
+	      result[key] = merge(result[key], val);
+	    } else {
+	      result[key] = val;
+	    }
+	  }
+
+	  for (var i = 0, l = arguments.length; i < l; i++) {
+	    forEach(arguments[i], assignValue);
+	  }
+	  return result;
+	}
+
+	/**
+	 * Function equal to merge with the difference being that no reference
+	 * to original objects is kept.
+	 *
+	 * @see merge
+	 * @param {Object} obj1 Object to merge
+	 * @returns {Object} Result of all merge properties
+	 */
+	function deepMerge(/* obj1, obj2, obj3, ... */) {
+	  var result = {};
+	  function assignValue(val, key) {
+	    if (typeof result[key] === 'object' && typeof val === 'object') {
+	      result[key] = deepMerge(result[key], val);
+	    } else if (typeof val === 'object') {
+	      result[key] = deepMerge({}, val);
+	    } else {
+	      result[key] = val;
+	    }
+	  }
+
+	  for (var i = 0, l = arguments.length; i < l; i++) {
+	    forEach(arguments[i], assignValue);
+	  }
+	  return result;
+	}
+
+	/**
+	 * Extends object a by mutably adding to it the properties of object b.
+	 *
+	 * @param {Object} a The object to be extended
+	 * @param {Object} b The object to copy properties from
+	 * @param {Object} thisArg The object to bind function to
+	 * @return {Object} The resulting value of object a
+	 */
+	function extend(a, b, thisArg) {
+	  forEach(b, function assignValue(val, key) {
+	    if (thisArg && typeof val === 'function') {
+	      a[key] = bind(val, thisArg);
+	    } else {
+	      a[key] = val;
+	    }
+	  });
+	  return a;
+	}
+
+	var utils = {
+	  isArray: isArray,
+	  isArrayBuffer: isArrayBuffer,
+	  isBuffer: isBuffer,
+	  isFormData: isFormData,
+	  isArrayBufferView: isArrayBufferView,
+	  isString: isString,
+	  isNumber: isNumber,
+	  isObject: isObject,
+	  isUndefined: isUndefined,
+	  isDate: isDate,
+	  isFile: isFile,
+	  isBlob: isBlob,
+	  isFunction: isFunction$1,
+	  isStream: isStream,
+	  isURLSearchParams: isURLSearchParams,
+	  isStandardBrowserEnv: isStandardBrowserEnv,
+	  forEach: forEach,
+	  merge: merge,
+	  deepMerge: deepMerge,
+	  extend: extend,
+	  trim: trim
+	};
+
+	function encode(val) {
+	  return encodeURIComponent(val).
+	    replace(/%40/gi, '@').
+	    replace(/%3A/gi, ':').
+	    replace(/%24/g, '$').
+	    replace(/%2C/gi, ',').
+	    replace(/%20/g, '+').
+	    replace(/%5B/gi, '[').
+	    replace(/%5D/gi, ']');
+	}
+
+	/**
+	 * Build a URL by appending params to the end
+	 *
+	 * @param {string} url The base of the url (e.g., http://www.google.com)
+	 * @param {object} [params] The params to be appended
+	 * @returns {string} The formatted url
+	 */
+	var buildURL = function buildURL(url, params, paramsSerializer) {
+	  /*eslint no-param-reassign:0*/
+	  if (!params) {
+	    return url;
+	  }
+
+	  var serializedParams;
+	  if (paramsSerializer) {
+	    serializedParams = paramsSerializer(params);
+	  } else if (utils.isURLSearchParams(params)) {
+	    serializedParams = params.toString();
+	  } else {
+	    var parts = [];
+
+	    utils.forEach(params, function serialize(val, key) {
+	      if (val === null || typeof val === 'undefined') {
+	        return;
+	      }
+
+	      if (utils.isArray(val)) {
+	        key = key + '[]';
+	      } else {
+	        val = [val];
+	      }
+
+	      utils.forEach(val, function parseValue(v) {
+	        if (utils.isDate(v)) {
+	          v = v.toISOString();
+	        } else if (utils.isObject(v)) {
+	          v = JSON.stringify(v);
+	        }
+	        parts.push(encode(key) + '=' + encode(v));
+	      });
+	    });
+
+	    serializedParams = parts.join('&');
+	  }
+
+	  if (serializedParams) {
+	    var hashmarkIndex = url.indexOf('#');
+	    if (hashmarkIndex !== -1) {
+	      url = url.slice(0, hashmarkIndex);
+	    }
+
+	    url += (url.indexOf('?') === -1 ? '?' : '&') + serializedParams;
+	  }
+
+	  return url;
+	};
+
+	function InterceptorManager() {
+	  this.handlers = [];
+	}
+
+	/**
+	 * Add a new interceptor to the stack
+	 *
+	 * @param {Function} fulfilled The function to handle `then` for a `Promise`
+	 * @param {Function} rejected The function to handle `reject` for a `Promise`
+	 *
+	 * @return {Number} An ID used to remove interceptor later
+	 */
+	InterceptorManager.prototype.use = function use(fulfilled, rejected) {
+	  this.handlers.push({
+	    fulfilled: fulfilled,
+	    rejected: rejected
+	  });
+	  return this.handlers.length - 1;
+	};
+
+	/**
+	 * Remove an interceptor from the stack
+	 *
+	 * @param {Number} id The ID that was returned by `use`
+	 */
+	InterceptorManager.prototype.eject = function eject(id) {
+	  if (this.handlers[id]) {
+	    this.handlers[id] = null;
+	  }
+	};
+
+	/**
+	 * Iterate over all the registered interceptors
+	 *
+	 * This method is particularly useful for skipping over any
+	 * interceptors that may have become `null` calling `eject`.
+	 *
+	 * @param {Function} fn The function to call for each interceptor
+	 */
+	InterceptorManager.prototype.forEach = function forEach(fn) {
+	  utils.forEach(this.handlers, function forEachHandler(h) {
+	    if (h !== null) {
+	      fn(h);
+	    }
+	  });
+	};
+
+	var InterceptorManager_1 = InterceptorManager;
+
+	/**
+	 * Transform the data for a request or a response
+	 *
+	 * @param {Object|String} data The data to be transformed
+	 * @param {Array} headers The headers for the request or response
+	 * @param {Array|Function} fns A single function or Array of functions
+	 * @returns {*} The resulting transformed data
+	 */
+	var transformData = function transformData(data, headers, fns) {
+	  /*eslint no-param-reassign:0*/
+	  utils.forEach(fns, function transform(fn) {
+	    data = fn(data, headers);
+	  });
+
+	  return data;
+	};
+
+	var isCancel = function isCancel(value) {
+	  return !!(value && value.__CANCEL__);
+	};
+
+	var normalizeHeaderName = function normalizeHeaderName(headers, normalizedName) {
+	  utils.forEach(headers, function processHeader(value, name) {
+	    if (name !== normalizedName && name.toUpperCase() === normalizedName.toUpperCase()) {
+	      headers[normalizedName] = value;
+	      delete headers[name];
+	    }
+	  });
+	};
+
+	/**
+	 * Update an Error with the specified config, error code, and response.
+	 *
+	 * @param {Error} error The error to update.
+	 * @param {Object} config The config.
+	 * @param {string} [code] The error code (for example, 'ECONNABORTED').
+	 * @param {Object} [request] The request.
+	 * @param {Object} [response] The response.
+	 * @returns {Error} The error.
+	 */
+	var enhanceError = function enhanceError(error, config, code, request, response) {
+	  error.config = config;
+	  if (code) {
+	    error.code = code;
+	  }
+
+	  error.request = request;
+	  error.response = response;
+	  error.isAxiosError = true;
+
+	  error.toJSON = function() {
+	    return {
+	      // Standard
+	      message: this.message,
+	      name: this.name,
+	      // Microsoft
+	      description: this.description,
+	      number: this.number,
+	      // Mozilla
+	      fileName: this.fileName,
+	      lineNumber: this.lineNumber,
+	      columnNumber: this.columnNumber,
+	      stack: this.stack,
+	      // Axios
+	      config: this.config,
+	      code: this.code
+	    };
+	  };
+	  return error;
+	};
+
+	/**
+	 * Create an Error with the specified message, config, error code, request and response.
+	 *
+	 * @param {string} message The error message.
+	 * @param {Object} config The config.
+	 * @param {string} [code] The error code (for example, 'ECONNABORTED').
+	 * @param {Object} [request] The request.
+	 * @param {Object} [response] The response.
+	 * @returns {Error} The created error.
+	 */
+	var createError = function createError(message, config, code, request, response) {
+	  var error = new Error(message);
+	  return enhanceError(error, config, code, request, response);
+	};
+
+	/**
+	 * Resolve or reject a Promise based on response status.
+	 *
+	 * @param {Function} resolve A function that resolves the promise.
+	 * @param {Function} reject A function that rejects the promise.
+	 * @param {object} response The response.
+	 */
+	var settle = function settle(resolve, reject, response) {
+	  var validateStatus = response.config.validateStatus;
+	  if (!validateStatus || validateStatus(response.status)) {
+	    resolve(response);
+	  } else {
+	    reject(createError(
+	      'Request failed with status code ' + response.status,
+	      response.config,
+	      null,
+	      response.request,
+	      response
+	    ));
+	  }
+	};
+
+	/**
+	 * Determines whether the specified URL is absolute
+	 *
+	 * @param {string} url The URL to test
+	 * @returns {boolean} True if the specified URL is absolute, otherwise false
+	 */
+	var isAbsoluteURL = function isAbsoluteURL(url) {
+	  // A URL is considered absolute if it begins with "<scheme>://" or "//" (protocol-relative URL).
+	  // RFC 3986 defines scheme name as a sequence of characters beginning with a letter and followed
+	  // by any combination of letters, digits, plus, period, or hyphen.
+	  return /^([a-z][a-z\d\+\-\.]*:)?\/\//i.test(url);
+	};
+
+	/**
+	 * Creates a new URL by combining the specified URLs
+	 *
+	 * @param {string} baseURL The base URL
+	 * @param {string} relativeURL The relative URL
+	 * @returns {string} The combined URL
+	 */
+	var combineURLs = function combineURLs(baseURL, relativeURL) {
+	  return relativeURL
+	    ? baseURL.replace(/\/+$/, '') + '/' + relativeURL.replace(/^\/+/, '')
+	    : baseURL;
+	};
+
+	/**
+	 * Creates a new URL by combining the baseURL with the requestedURL,
+	 * only when the requestedURL is not already an absolute URL.
+	 * If the requestURL is absolute, this function returns the requestedURL untouched.
+	 *
+	 * @param {string} baseURL The base URL
+	 * @param {string} requestedURL Absolute or relative URL to combine
+	 * @returns {string} The combined full path
+	 */
+	var buildFullPath = function buildFullPath(baseURL, requestedURL) {
+	  if (baseURL && !isAbsoluteURL(requestedURL)) {
+	    return combineURLs(baseURL, requestedURL);
+	  }
+	  return requestedURL;
+	};
+
+	// Headers whose duplicates are ignored by node
+	// c.f. https://nodejs.org/api/http.html#http_message_headers
+	var ignoreDuplicateOf = [
+	  'age', 'authorization', 'content-length', 'content-type', 'etag',
+	  'expires', 'from', 'host', 'if-modified-since', 'if-unmodified-since',
+	  'last-modified', 'location', 'max-forwards', 'proxy-authorization',
+	  'referer', 'retry-after', 'user-agent'
+	];
+
+	/**
+	 * Parse headers into an object
+	 *
+	 * ```
+	 * Date: Wed, 27 Aug 2014 08:58:49 GMT
+	 * Content-Type: application/json
+	 * Connection: keep-alive
+	 * Transfer-Encoding: chunked
+	 * ```
+	 *
+	 * @param {String} headers Headers needing to be parsed
+	 * @returns {Object} Headers parsed into an object
+	 */
+	var parseHeaders = function parseHeaders(headers) {
+	  var parsed = {};
+	  var key;
+	  var val;
+	  var i;
+
+	  if (!headers) { return parsed; }
+
+	  utils.forEach(headers.split('\n'), function parser(line) {
+	    i = line.indexOf(':');
+	    key = utils.trim(line.substr(0, i)).toLowerCase();
+	    val = utils.trim(line.substr(i + 1));
+
+	    if (key) {
+	      if (parsed[key] && ignoreDuplicateOf.indexOf(key) >= 0) {
+	        return;
+	      }
+	      if (key === 'set-cookie') {
+	        parsed[key] = (parsed[key] ? parsed[key] : []).concat([val]);
+	      } else {
+	        parsed[key] = parsed[key] ? parsed[key] + ', ' + val : val;
+	      }
+	    }
+	  });
+
+	  return parsed;
+	};
+
+	var isURLSameOrigin = (
+	  utils.isStandardBrowserEnv() ?
+
+	  // Standard browser envs have full support of the APIs needed to test
+	  // whether the request URL is of the same origin as current location.
+	    (function standardBrowserEnv() {
+	      var msie = /(msie|trident)/i.test(navigator.userAgent);
+	      var urlParsingNode = document.createElement('a');
+	      var originURL;
+
+	      /**
+	    * Parse a URL to discover it's components
+	    *
+	    * @param {String} url The URL to be parsed
+	    * @returns {Object}
+	    */
+	      function resolveURL(url) {
+	        var href = url;
+
+	        if (msie) {
+	        // IE needs attribute set twice to normalize properties
+	          urlParsingNode.setAttribute('href', href);
+	          href = urlParsingNode.href;
+	        }
+
+	        urlParsingNode.setAttribute('href', href);
+
+	        // urlParsingNode provides the UrlUtils interface - http://url.spec.whatwg.org/#urlutils
+	        return {
+	          href: urlParsingNode.href,
+	          protocol: urlParsingNode.protocol ? urlParsingNode.protocol.replace(/:$/, '') : '',
+	          host: urlParsingNode.host,
+	          search: urlParsingNode.search ? urlParsingNode.search.replace(/^\?/, '') : '',
+	          hash: urlParsingNode.hash ? urlParsingNode.hash.replace(/^#/, '') : '',
+	          hostname: urlParsingNode.hostname,
+	          port: urlParsingNode.port,
+	          pathname: (urlParsingNode.pathname.charAt(0) === '/') ?
+	            urlParsingNode.pathname :
+	            '/' + urlParsingNode.pathname
+	        };
+	      }
+
+	      originURL = resolveURL(window.location.href);
+
+	      /**
+	    * Determine if a URL shares the same origin as the current location
+	    *
+	    * @param {String} requestURL The URL to test
+	    * @returns {boolean} True if URL shares the same origin, otherwise false
+	    */
+	      return function isURLSameOrigin(requestURL) {
+	        var parsed = (utils.isString(requestURL)) ? resolveURL(requestURL) : requestURL;
+	        return (parsed.protocol === originURL.protocol &&
+	            parsed.host === originURL.host);
+	      };
+	    })() :
+
+	  // Non standard browser envs (web workers, react-native) lack needed support.
+	    (function nonStandardBrowserEnv() {
+	      return function isURLSameOrigin() {
+	        return true;
+	      };
+	    })()
+	);
+
+	var cookies = (
+	  utils.isStandardBrowserEnv() ?
+
+	  // Standard browser envs support document.cookie
+	    (function standardBrowserEnv() {
+	      return {
+	        write: function write(name, value, expires, path, domain, secure) {
+	          var cookie = [];
+	          cookie.push(name + '=' + encodeURIComponent(value));
+
+	          if (utils.isNumber(expires)) {
+	            cookie.push('expires=' + new Date(expires).toGMTString());
+	          }
+
+	          if (utils.isString(path)) {
+	            cookie.push('path=' + path);
+	          }
+
+	          if (utils.isString(domain)) {
+	            cookie.push('domain=' + domain);
+	          }
+
+	          if (secure === true) {
+	            cookie.push('secure');
+	          }
+
+	          document.cookie = cookie.join('; ');
+	        },
+
+	        read: function read(name) {
+	          var match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+	          return (match ? decodeURIComponent(match[3]) : null);
+	        },
+
+	        remove: function remove(name) {
+	          this.write(name, '', Date.now() - 86400000);
+	        }
+	      };
+	    })() :
+
+	  // Non standard browser env (web workers, react-native) lack needed support.
+	    (function nonStandardBrowserEnv() {
+	      return {
+	        write: function write() {},
+	        read: function read() { return null; },
+	        remove: function remove() {}
+	      };
+	    })()
+	);
+
+	var xhr = function xhrAdapter(config) {
+	  return new Promise(function dispatchXhrRequest(resolve, reject) {
+	    var requestData = config.data;
+	    var requestHeaders = config.headers;
+
+	    if (utils.isFormData(requestData)) {
+	      delete requestHeaders['Content-Type']; // Let the browser set it
+	    }
+
+	    var request = new XMLHttpRequest();
+
+	    // HTTP basic authentication
+	    if (config.auth) {
+	      var username = config.auth.username || '';
+	      var password = config.auth.password || '';
+	      requestHeaders.Authorization = 'Basic ' + btoa(username + ':' + password);
+	    }
+
+	    var fullPath = buildFullPath(config.baseURL, config.url);
+	    request.open(config.method.toUpperCase(), buildURL(fullPath, config.params, config.paramsSerializer), true);
+
+	    // Set the request timeout in MS
+	    request.timeout = config.timeout;
+
+	    // Listen for ready state
+	    request.onreadystatechange = function handleLoad() {
+	      if (!request || request.readyState !== 4) {
+	        return;
+	      }
+
+	      // The request errored out and we didn't get a response, this will be
+	      // handled by onerror instead
+	      // With one exception: request that using file: protocol, most browsers
+	      // will return status as 0 even though it's a successful request
+	      if (request.status === 0 && !(request.responseURL && request.responseURL.indexOf('file:') === 0)) {
+	        return;
+	      }
+
+	      // Prepare the response
+	      var responseHeaders = 'getAllResponseHeaders' in request ? parseHeaders(request.getAllResponseHeaders()) : null;
+	      var responseData = !config.responseType || config.responseType === 'text' ? request.responseText : request.response;
+	      var response = {
+	        data: responseData,
+	        status: request.status,
+	        statusText: request.statusText,
+	        headers: responseHeaders,
+	        config: config,
+	        request: request
+	      };
+
+	      settle(resolve, reject, response);
+
+	      // Clean up request
+	      request = null;
+	    };
+
+	    // Handle browser request cancellation (as opposed to a manual cancellation)
+	    request.onabort = function handleAbort() {
+	      if (!request) {
+	        return;
+	      }
+
+	      reject(createError('Request aborted', config, 'ECONNABORTED', request));
+
+	      // Clean up request
+	      request = null;
+	    };
+
+	    // Handle low level network errors
+	    request.onerror = function handleError() {
+	      // Real errors are hidden from us by the browser
+	      // onerror should only fire if it's a network error
+	      reject(createError('Network Error', config, null, request));
+
+	      // Clean up request
+	      request = null;
+	    };
+
+	    // Handle timeout
+	    request.ontimeout = function handleTimeout() {
+	      var timeoutErrorMessage = 'timeout of ' + config.timeout + 'ms exceeded';
+	      if (config.timeoutErrorMessage) {
+	        timeoutErrorMessage = config.timeoutErrorMessage;
+	      }
+	      reject(createError(timeoutErrorMessage, config, 'ECONNABORTED',
+	        request));
+
+	      // Clean up request
+	      request = null;
+	    };
+
+	    // Add xsrf header
+	    // This is only done if running in a standard browser environment.
+	    // Specifically not if we're in a web worker, or react-native.
+	    if (utils.isStandardBrowserEnv()) {
+	      var cookies$1 = cookies;
+
+	      // Add xsrf header
+	      var xsrfValue = (config.withCredentials || isURLSameOrigin(fullPath)) && config.xsrfCookieName ?
+	        cookies$1.read(config.xsrfCookieName) :
+	        undefined;
+
+	      if (xsrfValue) {
+	        requestHeaders[config.xsrfHeaderName] = xsrfValue;
+	      }
+	    }
+
+	    // Add headers to the request
+	    if ('setRequestHeader' in request) {
+	      utils.forEach(requestHeaders, function setRequestHeader(val, key) {
+	        if (typeof requestData === 'undefined' && key.toLowerCase() === 'content-type') {
+	          // Remove Content-Type if data is undefined
+	          delete requestHeaders[key];
+	        } else {
+	          // Otherwise add header to the request
+	          request.setRequestHeader(key, val);
+	        }
+	      });
+	    }
+
+	    // Add withCredentials to request if needed
+	    if (!utils.isUndefined(config.withCredentials)) {
+	      request.withCredentials = !!config.withCredentials;
+	    }
+
+	    // Add responseType to request if needed
+	    if (config.responseType) {
+	      try {
+	        request.responseType = config.responseType;
+	      } catch (e) {
+	        // Expected DOMException thrown by browsers not compatible XMLHttpRequest Level 2.
+	        // But, this can be suppressed for 'json' type as it can be parsed by default 'transformResponse' function.
+	        if (config.responseType !== 'json') {
+	          throw e;
+	        }
+	      }
+	    }
+
+	    // Handle progress if needed
+	    if (typeof config.onDownloadProgress === 'function') {
+	      request.addEventListener('progress', config.onDownloadProgress);
+	    }
+
+	    // Not all browsers support upload events
+	    if (typeof config.onUploadProgress === 'function' && request.upload) {
+	      request.upload.addEventListener('progress', config.onUploadProgress);
+	    }
+
+	    if (config.cancelToken) {
+	      // Handle cancellation
+	      config.cancelToken.promise.then(function onCanceled(cancel) {
+	        if (!request) {
+	          return;
+	        }
+
+	        request.abort();
+	        reject(cancel);
+	        // Clean up request
+	        request = null;
+	      });
+	    }
+
+	    if (requestData === undefined) {
+	      requestData = null;
+	    }
+
+	    // Send the request
+	    request.send(requestData);
+	  });
+	};
+
+	var DEFAULT_CONTENT_TYPE = {
+	  'Content-Type': 'application/x-www-form-urlencoded'
+	};
+
+	function setContentTypeIfUnset(headers, value) {
+	  if (!utils.isUndefined(headers) && utils.isUndefined(headers['Content-Type'])) {
+	    headers['Content-Type'] = value;
+	  }
+	}
+
+	function getDefaultAdapter() {
+	  var adapter;
+	  if (typeof XMLHttpRequest !== 'undefined') {
+	    // For browsers use XHR adapter
+	    adapter = xhr;
+	  } else if (typeof process !== 'undefined' && Object.prototype.toString.call(process) === '[object process]') {
+	    // For node use HTTP adapter
+	    adapter = xhr;
+	  }
+	  return adapter;
+	}
+
+	var defaults = {
+	  adapter: getDefaultAdapter(),
+
+	  transformRequest: [function transformRequest(data, headers) {
+	    normalizeHeaderName(headers, 'Accept');
+	    normalizeHeaderName(headers, 'Content-Type');
+	    if (utils.isFormData(data) ||
+	      utils.isArrayBuffer(data) ||
+	      utils.isBuffer(data) ||
+	      utils.isStream(data) ||
+	      utils.isFile(data) ||
+	      utils.isBlob(data)
+	    ) {
+	      return data;
+	    }
+	    if (utils.isArrayBufferView(data)) {
+	      return data.buffer;
+	    }
+	    if (utils.isURLSearchParams(data)) {
+	      setContentTypeIfUnset(headers, 'application/x-www-form-urlencoded;charset=utf-8');
+	      return data.toString();
+	    }
+	    if (utils.isObject(data)) {
+	      setContentTypeIfUnset(headers, 'application/json;charset=utf-8');
+	      return JSON.stringify(data);
+	    }
+	    return data;
+	  }],
+
+	  transformResponse: [function transformResponse(data) {
+	    /*eslint no-param-reassign:0*/
+	    if (typeof data === 'string') {
+	      try {
+	        data = JSON.parse(data);
+	      } catch (e) { /* Ignore */ }
+	    }
+	    return data;
+	  }],
+
+	  /**
+	   * A timeout in milliseconds to abort a request. If set to 0 (default) a
+	   * timeout is not created.
+	   */
+	  timeout: 0,
+
+	  xsrfCookieName: 'XSRF-TOKEN',
+	  xsrfHeaderName: 'X-XSRF-TOKEN',
+
+	  maxContentLength: -1,
+
+	  validateStatus: function validateStatus(status) {
+	    return status >= 200 && status < 300;
+	  }
+	};
+
+	defaults.headers = {
+	  common: {
+	    'Accept': 'application/json, text/plain, */*'
+	  }
+	};
+
+	utils.forEach(['delete', 'get', 'head'], function forEachMethodNoData(method) {
+	  defaults.headers[method] = {};
+	});
+
+	utils.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
+	  defaults.headers[method] = utils.merge(DEFAULT_CONTENT_TYPE);
+	});
+
+	var defaults_1 = defaults;
+
+	/**
+	 * Throws a `Cancel` if cancellation has been requested.
+	 */
+	function throwIfCancellationRequested(config) {
+	  if (config.cancelToken) {
+	    config.cancelToken.throwIfRequested();
+	  }
+	}
+
+	/**
+	 * Dispatch a request to the server using the configured adapter.
+	 *
+	 * @param {object} config The config that is to be used for the request
+	 * @returns {Promise} The Promise to be fulfilled
+	 */
+	var dispatchRequest = function dispatchRequest(config) {
+	  throwIfCancellationRequested(config);
+
+	  // Ensure headers exist
+	  config.headers = config.headers || {};
+
+	  // Transform request data
+	  config.data = transformData(
+	    config.data,
+	    config.headers,
+	    config.transformRequest
+	  );
+
+	  // Flatten headers
+	  config.headers = utils.merge(
+	    config.headers.common || {},
+	    config.headers[config.method] || {},
+	    config.headers
+	  );
+
+	  utils.forEach(
+	    ['delete', 'get', 'head', 'post', 'put', 'patch', 'common'],
+	    function cleanHeaderConfig(method) {
+	      delete config.headers[method];
+	    }
+	  );
+
+	  var adapter = config.adapter || defaults_1.adapter;
+
+	  return adapter(config).then(function onAdapterResolution(response) {
+	    throwIfCancellationRequested(config);
+
+	    // Transform response data
+	    response.data = transformData(
+	      response.data,
+	      response.headers,
+	      config.transformResponse
+	    );
+
+	    return response;
+	  }, function onAdapterRejection(reason) {
+	    if (!isCancel(reason)) {
+	      throwIfCancellationRequested(config);
+
+	      // Transform response data
+	      if (reason && reason.response) {
+	        reason.response.data = transformData(
+	          reason.response.data,
+	          reason.response.headers,
+	          config.transformResponse
+	        );
+	      }
+	    }
+
+	    return Promise.reject(reason);
+	  });
+	};
+
+	/**
+	 * Config-specific merge-function which creates a new config-object
+	 * by merging two configuration objects together.
+	 *
+	 * @param {Object} config1
+	 * @param {Object} config2
+	 * @returns {Object} New object resulting from merging config2 to config1
+	 */
+	var mergeConfig = function mergeConfig(config1, config2) {
+	  // eslint-disable-next-line no-param-reassign
+	  config2 = config2 || {};
+	  var config = {};
+
+	  var valueFromConfig2Keys = ['url', 'method', 'params', 'data'];
+	  var mergeDeepPropertiesKeys = ['headers', 'auth', 'proxy'];
+	  var defaultToConfig2Keys = [
+	    'baseURL', 'url', 'transformRequest', 'transformResponse', 'paramsSerializer',
+	    'timeout', 'withCredentials', 'adapter', 'responseType', 'xsrfCookieName',
+	    'xsrfHeaderName', 'onUploadProgress', 'onDownloadProgress',
+	    'maxContentLength', 'validateStatus', 'maxRedirects', 'httpAgent',
+	    'httpsAgent', 'cancelToken', 'socketPath'
+	  ];
+
+	  utils.forEach(valueFromConfig2Keys, function valueFromConfig2(prop) {
+	    if (typeof config2[prop] !== 'undefined') {
+	      config[prop] = config2[prop];
+	    }
+	  });
+
+	  utils.forEach(mergeDeepPropertiesKeys, function mergeDeepProperties(prop) {
+	    if (utils.isObject(config2[prop])) {
+	      config[prop] = utils.deepMerge(config1[prop], config2[prop]);
+	    } else if (typeof config2[prop] !== 'undefined') {
+	      config[prop] = config2[prop];
+	    } else if (utils.isObject(config1[prop])) {
+	      config[prop] = utils.deepMerge(config1[prop]);
+	    } else if (typeof config1[prop] !== 'undefined') {
+	      config[prop] = config1[prop];
+	    }
+	  });
+
+	  utils.forEach(defaultToConfig2Keys, function defaultToConfig2(prop) {
+	    if (typeof config2[prop] !== 'undefined') {
+	      config[prop] = config2[prop];
+	    } else if (typeof config1[prop] !== 'undefined') {
+	      config[prop] = config1[prop];
+	    }
+	  });
+
+	  var axiosKeys = valueFromConfig2Keys
+	    .concat(mergeDeepPropertiesKeys)
+	    .concat(defaultToConfig2Keys);
+
+	  var otherKeys = Object
+	    .keys(config2)
+	    .filter(function filterAxiosKeys(key) {
+	      return axiosKeys.indexOf(key) === -1;
+	    });
+
+	  utils.forEach(otherKeys, function otherKeysDefaultToConfig2(prop) {
+	    if (typeof config2[prop] !== 'undefined') {
+	      config[prop] = config2[prop];
+	    } else if (typeof config1[prop] !== 'undefined') {
+	      config[prop] = config1[prop];
+	    }
+	  });
+
+	  return config;
+	};
+
+	/**
+	 * Create a new instance of Axios
+	 *
+	 * @param {Object} instanceConfig The default config for the instance
+	 */
+	function Axios(instanceConfig) {
+	  this.defaults = instanceConfig;
+	  this.interceptors = {
+	    request: new InterceptorManager_1(),
+	    response: new InterceptorManager_1()
+	  };
+	}
+
+	/**
+	 * Dispatch a request
+	 *
+	 * @param {Object} config The config specific for this request (merged with this.defaults)
+	 */
+	Axios.prototype.request = function request(config) {
+	  /*eslint no-param-reassign:0*/
+	  // Allow for axios('example/url'[, config]) a la fetch API
+	  if (typeof config === 'string') {
+	    config = arguments[1] || {};
+	    config.url = arguments[0];
+	  } else {
+	    config = config || {};
+	  }
+
+	  config = mergeConfig(this.defaults, config);
+
+	  // Set config.method
+	  if (config.method) {
+	    config.method = config.method.toLowerCase();
+	  } else if (this.defaults.method) {
+	    config.method = this.defaults.method.toLowerCase();
+	  } else {
+	    config.method = 'get';
+	  }
+
+	  // Hook up interceptors middleware
+	  var chain = [dispatchRequest, undefined];
+	  var promise = Promise.resolve(config);
+
+	  this.interceptors.request.forEach(function unshiftRequestInterceptors(interceptor) {
+	    chain.unshift(interceptor.fulfilled, interceptor.rejected);
+	  });
+
+	  this.interceptors.response.forEach(function pushResponseInterceptors(interceptor) {
+	    chain.push(interceptor.fulfilled, interceptor.rejected);
+	  });
+
+	  while (chain.length) {
+	    promise = promise.then(chain.shift(), chain.shift());
+	  }
+
+	  return promise;
+	};
+
+	Axios.prototype.getUri = function getUri(config) {
+	  config = mergeConfig(this.defaults, config);
+	  return buildURL(config.url, config.params, config.paramsSerializer).replace(/^\?/, '');
+	};
+
+	// Provide aliases for supported request methods
+	utils.forEach(['delete', 'get', 'head', 'options'], function forEachMethodNoData(method) {
+	  /*eslint func-names:0*/
+	  Axios.prototype[method] = function(url, config) {
+	    return this.request(utils.merge(config || {}, {
+	      method: method,
+	      url: url
+	    }));
+	  };
+	});
+
+	utils.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
+	  /*eslint func-names:0*/
+	  Axios.prototype[method] = function(url, data, config) {
+	    return this.request(utils.merge(config || {}, {
+	      method: method,
+	      url: url,
+	      data: data
+	    }));
+	  };
+	});
+
+	var Axios_1 = Axios;
+
+	/**
+	 * A `Cancel` is an object that is thrown when an operation is canceled.
+	 *
+	 * @class
+	 * @param {string=} message The message.
+	 */
+	function Cancel(message) {
+	  this.message = message;
+	}
+
+	Cancel.prototype.toString = function toString() {
+	  return 'Cancel' + (this.message ? ': ' + this.message : '');
+	};
+
+	Cancel.prototype.__CANCEL__ = true;
+
+	var Cancel_1 = Cancel;
+
+	/**
+	 * A `CancelToken` is an object that can be used to request cancellation of an operation.
+	 *
+	 * @class
+	 * @param {Function} executor The executor function.
+	 */
+	function CancelToken(executor) {
+	  if (typeof executor !== 'function') {
+	    throw new TypeError('executor must be a function.');
+	  }
+
+	  var resolvePromise;
+	  this.promise = new Promise(function promiseExecutor(resolve) {
+	    resolvePromise = resolve;
+	  });
+
+	  var token = this;
+	  executor(function cancel(message) {
+	    if (token.reason) {
+	      // Cancellation has already been requested
+	      return;
+	    }
+
+	    token.reason = new Cancel_1(message);
+	    resolvePromise(token.reason);
+	  });
+	}
+
+	/**
+	 * Throws a `Cancel` if cancellation has been requested.
+	 */
+	CancelToken.prototype.throwIfRequested = function throwIfRequested() {
+	  if (this.reason) {
+	    throw this.reason;
+	  }
+	};
+
+	/**
+	 * Returns an object that contains a new `CancelToken` and a function that, when called,
+	 * cancels the `CancelToken`.
+	 */
+	CancelToken.source = function source() {
+	  var cancel;
+	  var token = new CancelToken(function executor(c) {
+	    cancel = c;
+	  });
+	  return {
+	    token: token,
+	    cancel: cancel
+	  };
+	};
+
+	var CancelToken_1 = CancelToken;
+
+	/**
+	 * Syntactic sugar for invoking a function and expanding an array for arguments.
+	 *
+	 * Common use case would be to use `Function.prototype.apply`.
+	 *
+	 *  ```js
+	 *  function f(x, y, z) {}
+	 *  var args = [1, 2, 3];
+	 *  f.apply(null, args);
+	 *  ```
+	 *
+	 * With `spread` this example can be re-written.
+	 *
+	 *  ```js
+	 *  spread(function(x, y, z) {})([1, 2, 3]);
+	 *  ```
+	 *
+	 * @param {Function} callback
+	 * @returns {Function}
+	 */
+	var spread = function spread(callback) {
+	  return function wrap(arr) {
+	    return callback.apply(null, arr);
+	  };
+	};
+
+	/**
+	 * Create an instance of Axios
+	 *
+	 * @param {Object} defaultConfig The default config for the instance
+	 * @return {Axios} A new instance of Axios
+	 */
+	function createInstance(defaultConfig) {
+	  var context = new Axios_1(defaultConfig);
+	  var instance = bind(Axios_1.prototype.request, context);
+
+	  // Copy axios.prototype to instance
+	  utils.extend(instance, Axios_1.prototype, context);
+
+	  // Copy context to instance
+	  utils.extend(instance, context);
+
+	  return instance;
+	}
+
+	// Create the default instance to be exported
+	var axios = createInstance(defaults_1);
+
+	// Expose Axios class to allow class inheritance
+	axios.Axios = Axios_1;
+
+	// Factory for creating new instances
+	axios.create = function create(instanceConfig) {
+	  return createInstance(mergeConfig(axios.defaults, instanceConfig));
+	};
+
+	// Expose Cancel & CancelToken
+	axios.Cancel = Cancel_1;
+	axios.CancelToken = CancelToken_1;
+	axios.isCancel = isCancel;
+
+	// Expose all/spread
+	axios.all = function all(promises) {
+	  return Promise.all(promises);
+	};
+	axios.spread = spread;
+
+	var axios_1 = axios;
+
+	// Allow use of default import syntax in TypeScript
+	var default_1 = axios;
+	axios_1.default = default_1;
+
+	var axios$1 = axios_1;
+
+	/* node_modules\svelte-feather-icons\src\icons\EditIcon.svelte generated by Svelte v3.19.2 */
+
+	const file$1 = "node_modules\\svelte-feather-icons\\src\\icons\\EditIcon.svelte";
+
+	function create_fragment$2(ctx) {
+		let svg;
+		let path0;
+		let path1;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				path0 = svg_element("path");
+				path1 = svg_element("path");
+				attr_dev(path0, "d", "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7");
+				add_location(path0, file$1, 12, 229, 485);
+				attr_dev(path1, "d", "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z");
+				add_location(path1, file$1, 12, 305, 561);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-edit " + /*customClass*/ ctx[1]);
+				add_location(svg, file$1, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, path0);
+				append_dev(svg, path1);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-edit " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$2.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$2($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<EditIcon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("EditIcon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class EditIcon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$2, create_fragment$2, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "EditIcon",
+				options,
+				id: create_fragment$2.name
+			});
+		}
+
+		get size() {
+			throw new Error("<EditIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<EditIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<EditIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<EditIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* node_modules\svelte-feather-icons\src\icons\MailIcon.svelte generated by Svelte v3.19.2 */
+
+	const file$2 = "node_modules\\svelte-feather-icons\\src\\icons\\MailIcon.svelte";
+
+	function create_fragment$3(ctx) {
+		let svg;
+		let path;
+		let polyline;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				path = svg_element("path");
+				polyline = svg_element("polyline");
+				attr_dev(path, "d", "M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z");
+				add_location(path, file$2, 12, 229, 485);
+				attr_dev(polyline, "points", "22,6 12,13 2,6");
+				add_location(polyline, file$2, 12, 322, 578);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-mail " + /*customClass*/ ctx[1]);
+				add_location(svg, file$2, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, path);
+				append_dev(svg, polyline);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-mail " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$3.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$3($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<MailIcon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("MailIcon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class MailIcon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$3, create_fragment$3, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "MailIcon",
+				options,
+				id: create_fragment$3.name
+			});
+		}
+
+		get size() {
+			throw new Error("<MailIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<MailIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<MailIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<MailIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* node_modules\svelte-feather-icons\src\icons\PhoneIcon.svelte generated by Svelte v3.19.2 */
+
+	const file$3 = "node_modules\\svelte-feather-icons\\src\\icons\\PhoneIcon.svelte";
+
+	function create_fragment$4(ctx) {
+		let svg;
+		let path;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				path = svg_element("path");
+				attr_dev(path, "d", "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z");
+				add_location(path, file$3, 12, 230, 486);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-phone " + /*customClass*/ ctx[1]);
+				add_location(svg, file$3, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, path);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-phone " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$4.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$4($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<PhoneIcon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("PhoneIcon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class PhoneIcon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$4, create_fragment$4, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "PhoneIcon",
+				options,
+				id: create_fragment$4.name
+			});
+		}
+
+		get size() {
+			throw new Error("<PhoneIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<PhoneIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<PhoneIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<PhoneIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* node_modules\svelte-feather-icons\src\icons\PlusSquareIcon.svelte generated by Svelte v3.19.2 */
+
+	const file$4 = "node_modules\\svelte-feather-icons\\src\\icons\\PlusSquareIcon.svelte";
+
+	function create_fragment$5(ctx) {
+		let svg;
+		let rect;
+		let line0;
+		let line1;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				rect = svg_element("rect");
+				line0 = svg_element("line");
+				line1 = svg_element("line");
+				attr_dev(rect, "x", "3");
+				attr_dev(rect, "y", "3");
+				attr_dev(rect, "width", "18");
+				attr_dev(rect, "height", "18");
+				attr_dev(rect, "rx", "2");
+				attr_dev(rect, "ry", "2");
+				add_location(rect, file$4, 12, 236, 492);
+				attr_dev(line0, "x1", "12");
+				attr_dev(line0, "y1", "8");
+				attr_dev(line0, "x2", "12");
+				attr_dev(line0, "y2", "16");
+				add_location(line0, file$4, 12, 298, 554);
+				attr_dev(line1, "x1", "8");
+				attr_dev(line1, "y1", "12");
+				attr_dev(line1, "x2", "16");
+				attr_dev(line1, "y2", "12");
+				add_location(line1, file$4, 12, 342, 598);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-plus-square " + /*customClass*/ ctx[1]);
+				add_location(svg, file$4, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, rect);
+				append_dev(svg, line0);
+				append_dev(svg, line1);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-plus-square " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$5.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$5($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<PlusSquareIcon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("PlusSquareIcon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class PlusSquareIcon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$5, create_fragment$5, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "PlusSquareIcon",
+				options,
+				id: create_fragment$5.name
+			});
+		}
+
+		get size() {
+			throw new Error("<PlusSquareIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<PlusSquareIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<PlusSquareIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<PlusSquareIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* node_modules\svelte-feather-icons\src\icons\Trash2Icon.svelte generated by Svelte v3.19.2 */
+
+	const file$5 = "node_modules\\svelte-feather-icons\\src\\icons\\Trash2Icon.svelte";
+
+	function create_fragment$6(ctx) {
+		let svg;
+		let polyline;
+		let path;
+		let line0;
+		let line1;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				polyline = svg_element("polyline");
+				path = svg_element("path");
+				line0 = svg_element("line");
+				line1 = svg_element("line");
+				attr_dev(polyline, "points", "3 6 5 6 21 6");
+				add_location(polyline, file$5, 12, 232, 488);
+				attr_dev(path, "d", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2");
+				add_location(path, file$5, 12, 275, 531);
+				attr_dev(line0, "x1", "10");
+				attr_dev(line0, "y1", "11");
+				attr_dev(line0, "x2", "10");
+				attr_dev(line0, "y2", "17");
+				add_location(line0, file$5, 12, 371, 627);
+				attr_dev(line1, "x1", "14");
+				attr_dev(line1, "y1", "11");
+				attr_dev(line1, "x2", "14");
+				attr_dev(line1, "y2", "17");
+				add_location(line1, file$5, 12, 416, 672);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-trash-2 " + /*customClass*/ ctx[1]);
+				add_location(svg, file$5, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, polyline);
+				append_dev(svg, path);
+				append_dev(svg, line0);
+				append_dev(svg, line1);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-trash-2 " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$6.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$6($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Trash2Icon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("Trash2Icon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class Trash2Icon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$6, create_fragment$6, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "Trash2Icon",
+				options,
+				id: create_fragment$6.name
+			});
+		}
+
+		get size() {
+			throw new Error("<Trash2Icon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<Trash2Icon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<Trash2Icon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<Trash2Icon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* node_modules\svelte-feather-icons\src\icons\UserPlusIcon.svelte generated by Svelte v3.19.2 */
+
+	const file$6 = "node_modules\\svelte-feather-icons\\src\\icons\\UserPlusIcon.svelte";
+
+	function create_fragment$7(ctx) {
+		let svg;
+		let path;
+		let circle;
+		let line0;
+		let line1;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				path = svg_element("path");
+				circle = svg_element("circle");
+				line0 = svg_element("line");
+				line1 = svg_element("line");
+				attr_dev(path, "d", "M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2");
+				add_location(path, file$6, 12, 234, 490);
+				attr_dev(circle, "cx", "8.5");
+				attr_dev(circle, "cy", "7");
+				attr_dev(circle, "r", "4");
+				add_location(circle, file$6, 12, 293, 549);
+				attr_dev(line0, "x1", "20");
+				attr_dev(line0, "y1", "8");
+				attr_dev(line0, "x2", "20");
+				attr_dev(line0, "y2", "14");
+				add_location(line0, file$6, 12, 332, 588);
+				attr_dev(line1, "x1", "23");
+				attr_dev(line1, "y1", "11");
+				attr_dev(line1, "x2", "17");
+				attr_dev(line1, "y2", "11");
+				add_location(line1, file$6, 12, 376, 632);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-user-plus " + /*customClass*/ ctx[1]);
+				add_location(svg, file$6, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, path);
+				append_dev(svg, circle);
+				append_dev(svg, line0);
+				append_dev(svg, line1);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-user-plus " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$7.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$7($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<UserPlusIcon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("UserPlusIcon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class UserPlusIcon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$7, create_fragment$7, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "UserPlusIcon",
+				options,
+				id: create_fragment$7.name
+			});
+		}
+
+		get size() {
+			throw new Error("<UserPlusIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<UserPlusIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<UserPlusIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<UserPlusIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* node_modules\svelte-feather-icons\src\icons\UserXIcon.svelte generated by Svelte v3.19.2 */
+
+	const file$7 = "node_modules\\svelte-feather-icons\\src\\icons\\UserXIcon.svelte";
+
+	function create_fragment$8(ctx) {
+		let svg;
+		let path;
+		let circle;
+		let line0;
+		let line1;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				path = svg_element("path");
+				circle = svg_element("circle");
+				line0 = svg_element("line");
+				line1 = svg_element("line");
+				attr_dev(path, "d", "M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2");
+				add_location(path, file$7, 12, 231, 487);
+				attr_dev(circle, "cx", "8.5");
+				attr_dev(circle, "cy", "7");
+				attr_dev(circle, "r", "4");
+				add_location(circle, file$7, 12, 290, 546);
+				attr_dev(line0, "x1", "18");
+				attr_dev(line0, "y1", "8");
+				attr_dev(line0, "x2", "23");
+				attr_dev(line0, "y2", "13");
+				add_location(line0, file$7, 12, 329, 585);
+				attr_dev(line1, "x1", "23");
+				attr_dev(line1, "y1", "8");
+				attr_dev(line1, "x2", "18");
+				attr_dev(line1, "y2", "13");
+				add_location(line1, file$7, 12, 373, 629);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-user-x " + /*customClass*/ ctx[1]);
+				add_location(svg, file$7, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, path);
+				append_dev(svg, circle);
+				append_dev(svg, line0);
+				append_dev(svg, line1);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-user-x " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$8.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$8($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<UserXIcon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("UserXIcon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class UserXIcon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$8, create_fragment$8, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "UserXIcon",
+				options,
+				id: create_fragment$8.name
+			});
+		}
+
+		get size() {
+			throw new Error("<UserXIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<UserXIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<UserXIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<UserXIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* node_modules\svelte-feather-icons\src\icons\UserIcon.svelte generated by Svelte v3.19.2 */
+
+	const file$8 = "node_modules\\svelte-feather-icons\\src\\icons\\UserIcon.svelte";
+
+	function create_fragment$9(ctx) {
+		let svg;
+		let path;
+		let circle;
+		let svg_class_value;
+
+		const block = {
+			c: function create() {
+				svg = svg_element("svg");
+				path = svg_element("path");
+				circle = svg_element("circle");
+				attr_dev(path, "d", "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2");
+				add_location(path, file$8, 12, 229, 485);
+				attr_dev(circle, "cx", "12");
+				attr_dev(circle, "cy", "7");
+				attr_dev(circle, "r", "4");
+				add_location(circle, file$8, 12, 288, 544);
+				attr_dev(svg, "xmlns", "http://www.w3.org/2000/svg");
+				attr_dev(svg, "width", /*size*/ ctx[0]);
+				attr_dev(svg, "height", /*size*/ ctx[0]);
+				attr_dev(svg, "fill", "none");
+				attr_dev(svg, "viewBox", "0 0 24 24");
+				attr_dev(svg, "stroke", "currentColor");
+				attr_dev(svg, "stroke-width", "2");
+				attr_dev(svg, "stroke-linecap", "round");
+				attr_dev(svg, "stroke-linejoin", "round");
+				attr_dev(svg, "class", svg_class_value = "feather feather-user " + /*customClass*/ ctx[1]);
+				add_location(svg, file$8, 12, 0, 256);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, svg, anchor);
+				append_dev(svg, path);
+				append_dev(svg, circle);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "width", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*size*/ 1) {
+					attr_dev(svg, "height", /*size*/ ctx[0]);
+				}
+
+				if (dirty & /*customClass*/ 2 && svg_class_value !== (svg_class_value = "feather feather-user " + /*customClass*/ ctx[1])) {
+					attr_dev(svg, "class", svg_class_value);
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(svg);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$9.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$9($$self, $$props, $$invalidate) {
+		let { size = "100%" } = $$props;
+		let { class: customClass = "" } = $$props;
+
+		if (size !== "100%") {
+			size = size.slice(-1) === "x"
+			? size.slice(0, size.length - 1) + "em"
+			: parseInt(size) + "px";
+		}
+
+		const writable_props = ["size", "class"];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<UserIcon> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("UserIcon", $$slots, []);
+
+		$$self.$set = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("class" in $$props) $$invalidate(1, customClass = $$props.class);
+		};
+
+		$$self.$capture_state = () => ({ size, customClass });
+
+		$$self.$inject_state = $$props => {
+			if ("size" in $$props) $$invalidate(0, size = $$props.size);
+			if ("customClass" in $$props) $$invalidate(1, customClass = $$props.customClass);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [size, customClass];
+	}
+
+	class UserIcon extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$9, create_fragment$9, safe_not_equal, { size: 0, class: 1 });
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "UserIcon",
+				options,
+				id: create_fragment$9.name
+			});
+		}
+
+		get size() {
+			throw new Error("<UserIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set size(value) {
+			throw new Error("<UserIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		get class() {
+			throw new Error("<UserIcon>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set class(value) {
+			throw new Error("<UserIcon>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+	}
+
+	/* src\routes\Teachers.svelte generated by Svelte v3.19.2 */
+
+	const file$9 = "src\\routes\\Teachers.svelte";
+
+	function get_each_context(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[16] = list[i];
+		child_ctx[18] = i;
+		return child_ctx;
+	}
+
+	function get_each_context_1(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[19] = list[i];
+		return child_ctx;
+	}
+
+	function get_each_context_2(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[22] = list[i];
+		return child_ctx;
+	}
+
+	// (175:0) {:else}
+	function create_else_block$1(ctx) {
+		let div;
+		let span;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				span = element("span");
+				span.textContent = "Loading...";
+				attr_dev(span, "class", "sr-only");
+				add_location(span, file$9, 176, 8, 4814);
+				attr_dev(div, "class", "spinner-border");
+				attr_dev(div, "role", "status");
+				add_location(div, file$9, 175, 4, 4762);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+				append_dev(div, span);
+			},
+			p: noop,
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block$1.name,
+			type: "else",
+			source: "(175:0) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (129:0) {#if isInitiated}
+	function create_if_block_3(ctx) {
+		let input;
+		let t0;
+		let table;
+		let thead;
+		let tr;
+		let th0;
+		let t2;
+		let th1;
+		let t4;
+		let th2;
+		let t6;
+		let th3;
+		let t8;
+		let th4;
+		let t10;
+		let th5;
+		let t11;
+		let tbody;
+		let current;
+		let dispose;
+		let each_value_2 = /*filteredTeachers*/ ctx[1];
+		validate_each_argument(each_value_2);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value_2.length; i += 1) {
+			each_blocks[i] = create_each_block_2(get_each_context_2(ctx, each_value_2, i));
+		}
+
+		const out = i => transition_out(each_blocks[i], 1, 1, () => {
+			each_blocks[i] = null;
+		});
+
+		const block = {
+			c: function create() {
+				input = element("input");
+				t0 = space();
+				table = element("table");
+				thead = element("thead");
+				tr = element("tr");
+				th0 = element("th");
+				th0.textContent = "#";
+				t2 = space();
+				th1 = element("th");
+				th1.textContent = "Full Name";
+				t4 = space();
+				th2 = element("th");
+				th2.textContent = "Username";
+				t6 = space();
+				th3 = element("th");
+				th3.textContent = "Skype";
+				t8 = space();
+				th4 = element("th");
+				th4.textContent = "Email";
+				t10 = space();
+				th5 = element("th");
+				t11 = space();
+				tbody = element("tbody");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				attr_dev(input, "type", "text");
+				attr_dev(input, "class", "form-control form-control-lg");
+				attr_dev(input, "placeholder", "Search Teacher");
+				add_location(input, file$9, 129, 4, 3103);
+				add_location(th0, file$9, 134, 16, 3343);
+				add_location(th1, file$9, 135, 16, 3371);
+				add_location(th2, file$9, 136, 16, 3407);
+				add_location(th3, file$9, 137, 16, 3442);
+				add_location(th4, file$9, 138, 16, 3474);
+				add_location(th5, file$9, 139, 16, 3506);
+				add_location(tr, file$9, 133, 12, 3321);
+				attr_dev(thead, "class", "thead-dark");
+				add_location(thead, file$9, 132, 8, 3281);
+				add_location(tbody, file$9, 142, 8, 3562);
+				attr_dev(table, "class", "table mt-4");
+				add_location(table, file$9, 131, 4, 3245);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, input, anchor);
+				set_input_value(input, /*keywords*/ ctx[2]);
+				insert_dev(target, t0, anchor);
+				insert_dev(target, table, anchor);
+				append_dev(table, thead);
+				append_dev(thead, tr);
+				append_dev(tr, th0);
+				append_dev(tr, t2);
+				append_dev(tr, th1);
+				append_dev(tr, t4);
+				append_dev(tr, th2);
+				append_dev(tr, t6);
+				append_dev(tr, th3);
+				append_dev(tr, t8);
+				append_dev(tr, th4);
+				append_dev(tr, t10);
+				append_dev(tr, th5);
+				append_dev(table, t11);
+				append_dev(table, tbody);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].m(tbody, null);
+				}
+
+				current = true;
+
+				dispose = [
+					listen_dev(input, "input", /*input_input_handler*/ ctx[14]),
+					listen_dev(input, "keyup", /*searchTeacher*/ ctx[8], false, false, false)
+				];
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*keywords*/ 4 && input.value !== /*keywords*/ ctx[2]) {
+					set_input_value(input, /*keywords*/ ctx[2]);
+				}
+
+				if (dirty & /*showConfirmRemove, filteredTeachers*/ 1026) {
+					each_value_2 = /*filteredTeachers*/ ctx[1];
+					validate_each_argument(each_value_2);
+					let i;
+
+					for (i = 0; i < each_value_2.length; i += 1) {
+						const child_ctx = get_each_context_2(ctx, each_value_2, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+							transition_in(each_blocks[i], 1);
+						} else {
+							each_blocks[i] = create_each_block_2(child_ctx);
+							each_blocks[i].c();
+							transition_in(each_blocks[i], 1);
+							each_blocks[i].m(tbody, null);
+						}
+					}
+
+					group_outros();
+
+					for (i = each_value_2.length; i < each_blocks.length; i += 1) {
+						out(i);
+					}
+
+					check_outros();
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+
+				for (let i = 0; i < each_value_2.length; i += 1) {
+					transition_in(each_blocks[i]);
+				}
+
+				current = true;
+			},
+			o: function outro(local) {
+				each_blocks = each_blocks.filter(Boolean);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					transition_out(each_blocks[i]);
+				}
+
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(input);
+				if (detaching) detach_dev(t0);
+				if (detaching) detach_dev(table);
+				destroy_each(each_blocks, detaching);
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_3.name,
+			type: "if",
+			source: "(129:0) {#if isInitiated}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (144:12) {#each filteredTeachers as teacher}
+	function create_each_block_2(ctx) {
+		let tr;
+		let td0;
+		let t0_value = /*teacher*/ ctx[22].id + "";
+		let t0;
+		let t1;
+		let td1;
+		let t2;
+		let a0;
+		let t3_value = /*teacher*/ ctx[22].full_name + "";
+		let t3;
+		let a0_href_value;
+		let t4;
+		let td2;
+		let t5_value = /*teacher*/ ctx[22].username + "";
+		let t5;
+		let t6;
+		let td3;
+		let t7;
+		let a1;
+		let t8_value = /*teacher*/ ctx[22].skype + "";
+		let t8;
+		let a1_href_value;
+		let t9;
+		let td4;
+		let t10;
+		let a2;
+		let t11_value = /*teacher*/ ctx[22].email + "";
+		let t11;
+		let a2_href_value;
+		let t12;
+		let td5;
+		let button;
+		let t13;
+		let t14;
+		let current;
+		let dispose;
+		const usericon = new UserIcon({ $$inline: true });
+		const phoneicon = new PhoneIcon({ $$inline: true });
+		const mailicon = new MailIcon({ $$inline: true });
+		const userxicon = new UserXIcon({ $$inline: true });
+
+		function click_handler(...args) {
+			return /*click_handler*/ ctx[15](/*teacher*/ ctx[22], ...args);
+		}
+
+		const block = {
+			c: function create() {
+				tr = element("tr");
+				td0 = element("td");
+				t0 = text(t0_value);
+				t1 = space();
+				td1 = element("td");
+				create_component(usericon.$$.fragment);
+				t2 = space();
+				a0 = element("a");
+				t3 = text(t3_value);
+				t4 = space();
+				td2 = element("td");
+				t5 = text(t5_value);
+				t6 = space();
+				td3 = element("td");
+				create_component(phoneicon.$$.fragment);
+				t7 = space();
+				a1 = element("a");
+				t8 = text(t8_value);
+				t9 = space();
+				td4 = element("td");
+				create_component(mailicon.$$.fragment);
+				t10 = space();
+				a2 = element("a");
+				t11 = text(t11_value);
+				t12 = space();
+				td5 = element("td");
+				button = element("button");
+				create_component(userxicon.$$.fragment);
+				t13 = text(" Remove");
+				t14 = space();
+				add_location(td0, file$9, 145, 20, 3662);
+				attr_dev(a0, "href", a0_href_value = "./teacher/?id=" + /*teacher*/ ctx[22].id);
+				add_location(a0, file$9, 148, 24, 3773);
+				add_location(td1, file$9, 146, 20, 3705);
+				add_location(td2, file$9, 152, 20, 3938);
+				attr_dev(a1, "href", a1_href_value = "skype:" + /*teacher*/ ctx[22].skype + "?chat");
+				add_location(a1, file$9, 157, 24, 4104);
+				add_location(td3, file$9, 155, 20, 4035);
+				attr_dev(a2, "href", a2_href_value = "mailto:" + /*teacher*/ ctx[22].email);
+				add_location(a2, file$9, 163, 24, 4333);
+				add_location(td4, file$9, 161, 20, 4265);
+				attr_dev(button, "class", "btn btn-secondary");
+				add_location(button, file$9, 168, 24, 4520);
+				add_location(td5, file$9, 167, 20, 4490);
+				add_location(tr, file$9, 144, 16, 3636);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, tr, anchor);
+				append_dev(tr, td0);
+				append_dev(td0, t0);
+				append_dev(tr, t1);
+				append_dev(tr, td1);
+				mount_component(usericon, td1, null);
+				append_dev(td1, t2);
+				append_dev(td1, a0);
+				append_dev(a0, t3);
+				append_dev(tr, t4);
+				append_dev(tr, td2);
+				append_dev(td2, t5);
+				append_dev(tr, t6);
+				append_dev(tr, td3);
+				mount_component(phoneicon, td3, null);
+				append_dev(td3, t7);
+				append_dev(td3, a1);
+				append_dev(a1, t8);
+				append_dev(tr, t9);
+				append_dev(tr, td4);
+				mount_component(mailicon, td4, null);
+				append_dev(td4, t10);
+				append_dev(td4, a2);
+				append_dev(a2, t11);
+				append_dev(tr, t12);
+				append_dev(tr, td5);
+				append_dev(td5, button);
+				mount_component(userxicon, button, null);
+				append_dev(button, t13);
+				append_dev(tr, t14);
+				current = true;
+				dispose = listen_dev(button, "click", prevent_default(click_handler), false, true, false);
+			},
+			p: function update(new_ctx, dirty) {
+				ctx = new_ctx;
+				if ((!current || dirty & /*filteredTeachers*/ 2) && t0_value !== (t0_value = /*teacher*/ ctx[22].id + "")) set_data_dev(t0, t0_value);
+				if ((!current || dirty & /*filteredTeachers*/ 2) && t3_value !== (t3_value = /*teacher*/ ctx[22].full_name + "")) set_data_dev(t3, t3_value);
+
+				if (!current || dirty & /*filteredTeachers*/ 2 && a0_href_value !== (a0_href_value = "./teacher/?id=" + /*teacher*/ ctx[22].id)) {
+					attr_dev(a0, "href", a0_href_value);
+				}
+
+				if ((!current || dirty & /*filteredTeachers*/ 2) && t5_value !== (t5_value = /*teacher*/ ctx[22].username + "")) set_data_dev(t5, t5_value);
+				if ((!current || dirty & /*filteredTeachers*/ 2) && t8_value !== (t8_value = /*teacher*/ ctx[22].skype + "")) set_data_dev(t8, t8_value);
+
+				if (!current || dirty & /*filteredTeachers*/ 2 && a1_href_value !== (a1_href_value = "skype:" + /*teacher*/ ctx[22].skype + "?chat")) {
+					attr_dev(a1, "href", a1_href_value);
+				}
+
+				if ((!current || dirty & /*filteredTeachers*/ 2) && t11_value !== (t11_value = /*teacher*/ ctx[22].email + "")) set_data_dev(t11, t11_value);
+
+				if (!current || dirty & /*filteredTeachers*/ 2 && a2_href_value !== (a2_href_value = "mailto:" + /*teacher*/ ctx[22].email)) {
+					attr_dev(a2, "href", a2_href_value);
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(usericon.$$.fragment, local);
+				transition_in(phoneicon.$$.fragment, local);
+				transition_in(mailicon.$$.fragment, local);
+				transition_in(userxicon.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(usericon.$$.fragment, local);
+				transition_out(phoneicon.$$.fragment, local);
+				transition_out(mailicon.$$.fragment, local);
+				transition_out(userxicon.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(tr);
+				destroy_component(usericon);
+				destroy_component(phoneicon);
+				destroy_component(mailicon);
+				destroy_component(userxicon);
+				dispose();
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block_2.name,
+			type: "each",
+			source: "(144:12) {#each filteredTeachers as teacher}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (190:16) {#if removeSuccess}
+	function create_if_block_2(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Successfully deleted teacher. Refreshing list...";
+				attr_dev(div, "class", "alert alert-success");
+				add_location(div, file$9, 190, 20, 5405);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_2.name,
+			type: "if",
+			source: "(190:16) {#if removeSuccess}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (219:16) {#if addErrors.length > 0}
+	function create_if_block_1(ctx) {
+		let div;
+		let ul;
+		let each_value_1 = /*addErrors*/ ctx[4];
+		validate_each_argument(each_value_1);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value_1.length; i += 1) {
+			each_blocks[i] = create_each_block_1(get_each_context_1(ctx, each_value_1, i));
+		}
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				ul = element("ul");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				add_location(ul, file$9, 220, 24, 6779);
+				attr_dev(div, "class", "alert alert-danger");
+				add_location(div, file$9, 219, 20, 6721);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+				append_dev(div, ul);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].m(ul, null);
+				}
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*addErrors*/ 16) {
+					each_value_1 = /*addErrors*/ ctx[4];
+					validate_each_argument(each_value_1);
+					let i;
+
+					for (i = 0; i < each_value_1.length; i += 1) {
+						const child_ctx = get_each_context_1(ctx, each_value_1, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+						} else {
+							each_blocks[i] = create_each_block_1(child_ctx);
+							each_blocks[i].c();
+							each_blocks[i].m(ul, null);
+						}
+					}
+
+					for (; i < each_blocks.length; i += 1) {
+						each_blocks[i].d(1);
+					}
+
+					each_blocks.length = each_value_1.length;
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+				destroy_each(each_blocks, detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1.name,
+			type: "if",
+			source: "(219:16) {#if addErrors.length > 0}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (222:28) {#each addErrors as error}
+	function create_each_block_1(ctx) {
+		let li;
+		let t_value = /*error*/ ctx[19] + "";
+		let t;
+
+		const block = {
+			c: function create() {
+				li = element("li");
+				t = text(t_value);
+				add_location(li, file$9, 222, 32, 6873);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, li, anchor);
+				append_dev(li, t);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*addErrors*/ 16 && t_value !== (t_value = /*error*/ ctx[19] + "")) set_data_dev(t, t_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(li);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block_1.name,
+			type: "each",
+			source: "(222:28) {#each addErrors as error}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (229:16) {#if addSuccess}
+	function create_if_block$1(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Successfully added teacher. Redirecting to teacher's page...";
+				attr_dev(div, "class", "alert alert-success");
+				add_location(div, file$9, 229, 20, 7066);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block$1.name,
+			type: "if",
+			source: "(229:16) {#if addSuccess}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (278:28) {#each educationalAttainment as ea, i}
+	function create_each_block(ctx) {
+		let option;
+		let t_value = /*ea*/ ctx[16] + "";
+		let t;
+		let option_value_value;
+
+		const block = {
+			c: function create() {
+				option = element("option");
+				t = text(t_value);
+				option.__value = option_value_value = /*i*/ ctx[18];
+				option.value = option.__value;
+				add_location(option, file$9, 278, 32, 9968);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, option, anchor);
+				append_dev(option, t);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*educationalAttainment*/ 8 && t_value !== (t_value = /*ea*/ ctx[16] + "")) set_data_dev(t, t_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(option);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block.name,
+			type: "each",
+			source: "(278:28) {#each educationalAttainment as ea, i}",
+			ctx
+		});
+
+		return block;
+	}
+
+	function create_fragment$a(ctx) {
+		let div2;
+		let div0;
+		let h2;
+		let t1;
+		let div1;
+		let button0;
+		let t2;
+		let t3;
+		let current_block_type_index;
+		let if_block0;
+		let t4;
+		let div8;
+		let div7;
+		let div6;
+		let div3;
+		let h50;
+		let t6;
+		let button1;
+		let span0;
+		let t8;
+		let div4;
+		let t9;
+		let mark;
+		let t10_value = /*tmp*/ ctx[6].full_name + "";
+		let t10;
+		let t11;
+		let t12;
+		let div5;
+		let button2;
+		let t14;
+		let button3;
+		let t16;
+		let div23;
+		let div22;
+		let div21;
+		let div9;
+		let h51;
+		let t18;
+		let button4;
+		let span1;
+		let t20;
+		let div20;
+		let span3;
+		let span2;
+		let t22;
+		let t23;
+		let t24;
+		let t25;
+		let form;
+		let div10;
+		let label0;
+		let t26;
+		let span4;
+		let t28;
+		let input0;
+		let t29;
+		let div11;
+		let label1;
+		let t30;
+		let span5;
+		let t32;
+		let input1;
+		let t33;
+		let div14;
+		let div12;
+		let label2;
+		let t34;
+		let span6;
+		let t36;
+		let input2;
+		let t37;
+		let div13;
+		let label3;
+		let t38;
+		let span7;
+		let t40;
+		let input3;
+		let t41;
+		let div15;
+		let label4;
+		let t42;
+		let span8;
+		let t44;
+		let input4;
+		let t45;
+		let div18;
+		let div16;
+		let label5;
+		let t46;
+		let span9;
+		let t48;
+		let input5;
+		let t49;
+		let div17;
+		let label6;
+		let t50;
+		let span10;
+		let t52;
+		let input6;
+		let t53;
+		let div19;
+		let label7;
+		let t54;
+		let span11;
+		let t56;
+		let select;
+		let t57;
+		let button5;
+		let t59;
+		let button6;
+		let current;
+		let dispose;
+		const userplusicon = new UserPlusIcon({ $$inline: true });
+		const if_block_creators = [create_if_block_3, create_else_block$1];
+		const if_blocks = [];
+
+		function select_block_type(ctx, dirty) {
+			if (/*isInitiated*/ ctx[0]) return 0;
+			return 1;
+		}
+
+		current_block_type_index = select_block_type(ctx);
+		if_block0 = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+		let if_block1 = /*removeSuccess*/ ctx[7] && create_if_block_2(ctx);
+		let if_block2 = /*addErrors*/ ctx[4].length > 0 && create_if_block_1(ctx);
+		let if_block3 = /*addSuccess*/ ctx[5] && create_if_block$1(ctx);
+		let each_value = /*educationalAttainment*/ ctx[3];
+		validate_each_argument(each_value);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value.length; i += 1) {
+			each_blocks[i] = create_each_block(get_each_context(ctx, each_value, i));
+		}
+
+		const block = {
+			c: function create() {
+				div2 = element("div");
+				div0 = element("div");
+				h2 = element("h2");
+				h2.textContent = "Teachers";
+				t1 = space();
+				div1 = element("div");
+				button0 = element("button");
+				create_component(userplusicon.$$.fragment);
+				t2 = text(" Add Teacher");
+				t3 = space();
+				if_block0.c();
+				t4 = space();
+				div8 = element("div");
+				div7 = element("div");
+				div6 = element("div");
+				div3 = element("div");
+				h50 = element("h5");
+				h50.textContent = "Remove teacher";
+				t6 = space();
+				button1 = element("button");
+				span0 = element("span");
+				span0.textContent = "×";
+				t8 = space();
+				div4 = element("div");
+				if (if_block1) if_block1.c();
+				t9 = text("\r\n                You are about to remove teacher ");
+				mark = element("mark");
+				t10 = text(t10_value);
+				t11 = text(". Are you sure you want to continue with this?");
+				t12 = space();
+				div5 = element("div");
+				button2 = element("button");
+				button2.textContent = "No";
+				t14 = space();
+				button3 = element("button");
+				button3.textContent = "Yes, continue";
+				t16 = space();
+				div23 = element("div");
+				div22 = element("div");
+				div21 = element("div");
+				div9 = element("div");
+				h51 = element("h5");
+				h51.textContent = "Add New Teacher";
+				t18 = space();
+				button4 = element("button");
+				span1 = element("span");
+				span1.textContent = "×";
+				t20 = space();
+				div20 = element("div");
+				span3 = element("span");
+				span2 = element("span");
+				span2.textContent = "*";
+				t22 = text(" Required fields");
+				t23 = space();
+				if (if_block2) if_block2.c();
+				t24 = space();
+				if (if_block3) if_block3.c();
+				t25 = space();
+				form = element("form");
+				div10 = element("div");
+				label0 = element("label");
+				t26 = text("Username ");
+				span4 = element("span");
+				span4.textContent = "*";
+				t28 = space();
+				input0 = element("input");
+				t29 = space();
+				div11 = element("div");
+				label1 = element("label");
+				t30 = text("Email ");
+				span5 = element("span");
+				span5.textContent = "*";
+				t32 = space();
+				input1 = element("input");
+				t33 = space();
+				div14 = element("div");
+				div12 = element("div");
+				label2 = element("label");
+				t34 = text("Password ");
+				span6 = element("span");
+				span6.textContent = "*";
+				t36 = space();
+				input2 = element("input");
+				t37 = space();
+				div13 = element("div");
+				label3 = element("label");
+				t38 = text("Password Repeat");
+				span7 = element("span");
+				span7.textContent = "*";
+				t40 = space();
+				input3 = element("input");
+				t41 = space();
+				div15 = element("div");
+				label4 = element("label");
+				t42 = text("Full Name ");
+				span8 = element("span");
+				span8.textContent = "*";
+				t44 = space();
+				input4 = element("input");
+				t45 = space();
+				div18 = element("div");
+				div16 = element("div");
+				label5 = element("label");
+				t46 = text("Skype ");
+				span9 = element("span");
+				span9.textContent = "*";
+				t48 = space();
+				input5 = element("input");
+				t49 = space();
+				div17 = element("div");
+				label6 = element("label");
+				t50 = text("Salary per class ");
+				span10 = element("span");
+				span10.textContent = "*";
+				t52 = space();
+				input6 = element("input");
+				t53 = space();
+				div19 = element("div");
+				label7 = element("label");
+				t54 = text("Educational Attainment ");
+				span11 = element("span");
+				span11.textContent = "*";
+				t56 = space();
+				select = element("select");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				t57 = space();
+				button5 = element("button");
+				button5.textContent = "Add";
+				t59 = space();
+				button6 = element("button");
+				button6.textContent = "Close";
+				attr_dev(h2, "class", "display-4");
+				add_location(h2, file$9, 118, 8, 2825);
+				add_location(div0, file$9, 117, 4, 2810);
+				attr_dev(button0, "type", "button");
+				attr_dev(button0, "class", "btn btn-secondary btn-lg");
+				attr_dev(button0, "data-toggle", "modal");
+				attr_dev(button0, "data-target", "#add-modal");
+				add_location(button0, file$9, 122, 8, 2895);
+				add_location(div1, file$9, 121, 4, 2880);
+				attr_dev(div2, "class", "d-flex justify-content-between align-items-center");
+				add_location(div2, file$9, 116, 0, 2741);
+				attr_dev(h50, "class", "modal-title");
+				add_location(h50, file$9, 183, 16, 5082);
+				attr_dev(span0, "aria-hidden", "true");
+				add_location(span0, file$9, 185, 20, 5222);
+				attr_dev(button1, "type", "button");
+				attr_dev(button1, "class", "close");
+				attr_dev(button1, "data-dismiss", "modal");
+				add_location(button1, file$9, 184, 16, 5143);
+				attr_dev(div3, "class", "modal-header");
+				add_location(div3, file$9, 182, 12, 5038);
+				add_location(mark, file$9, 194, 48, 5613);
+				attr_dev(div4, "class", "modal-body");
+				add_location(div4, file$9, 188, 12, 5322);
+				attr_dev(button2, "type", "button");
+				attr_dev(button2, "class", "btn btn-secondary");
+				attr_dev(button2, "data-dismiss", "modal");
+				add_location(button2, file$9, 197, 16, 5765);
+				attr_dev(button3, "type", "button");
+				attr_dev(button3, "class", "btn btn-danger");
+				add_location(button3, file$9, 198, 16, 5863);
+				attr_dev(div5, "class", "modal-footer");
+				add_location(div5, file$9, 196, 12, 5721);
+				attr_dev(div6, "class", "modal-content");
+				add_location(div6, file$9, 181, 8, 4997);
+				attr_dev(div7, "class", "modal-dialog");
+				attr_dev(div7, "role", "document");
+				add_location(div7, file$9, 180, 4, 4945);
+				attr_dev(div8, "class", "modal fade");
+				attr_dev(div8, "id", "remove-modal");
+				attr_dev(div8, "data-backdrop", "static");
+				add_location(div8, file$9, 179, 0, 4874);
+				attr_dev(h51, "class", "modal-title");
+				add_location(h51, file$9, 208, 16, 6243);
+				attr_dev(span1, "aria-hidden", "true");
+				add_location(span1, file$9, 210, 20, 6384);
+				attr_dev(button4, "type", "button");
+				attr_dev(button4, "class", "close");
+				attr_dev(button4, "data-dismiss", "modal");
+				add_location(button4, file$9, 209, 16, 6305);
+				attr_dev(div9, "class", "modal-header");
+				add_location(div9, file$9, 207, 12, 6199);
+				attr_dev(span2, "class", "required");
+				add_location(span2, file$9, 215, 20, 6581);
+				attr_dev(span3, "class", "text-muted af mb-2 svelte-1jqk8uy");
+				add_location(span3, file$9, 214, 16, 6526);
+				attr_dev(span4, "class", "required");
+				add_location(span4, file$9, 236, 63, 7428);
+				attr_dev(label0, "for", "teacher-username");
+				add_location(label0, file$9, 236, 24, 7389);
+				attr_dev(input0, "type", "text");
+				attr_dev(input0, "class", "form-control t");
+				attr_dev(input0, "id", "teacher-username");
+				attr_dev(input0, "name", "username");
+				add_location(input0, file$9, 237, 24, 7493);
+				attr_dev(div10, "class", "form-group");
+				add_location(div10, file$9, 235, 20, 7339);
+				attr_dev(span5, "class", "required");
+				add_location(span5, file$9, 241, 57, 7708);
+				attr_dev(label1, "for", "teacher-email");
+				add_location(label1, file$9, 241, 24, 7675);
+				attr_dev(input1, "type", "email");
+				attr_dev(input1, "class", "form-control t");
+				attr_dev(input1, "id", "teacher-email");
+				attr_dev(input1, "name", "email");
+				add_location(input1, file$9, 242, 24, 7773);
+				attr_dev(div11, "class", "form-group");
+				add_location(div11, file$9, 240, 20, 7625);
+				attr_dev(span6, "class", "required");
+				add_location(span6, file$9, 247, 67, 8045);
+				attr_dev(label2, "for", "teacher-password");
+				add_location(label2, file$9, 247, 28, 8006);
+				attr_dev(input2, "type", "password");
+				attr_dev(input2, "class", "form-control t");
+				attr_dev(input2, "id", "teacher-password");
+				attr_dev(input2, "name", "password");
+				add_location(input2, file$9, 248, 28, 8114);
+				attr_dev(div12, "class", "w-auto mr-2");
+				add_location(div12, file$9, 246, 24, 7951);
+				attr_dev(span7, "class", "required");
+				add_location(span7, file$9, 252, 80, 8360);
+				attr_dev(label3, "for", "teacher-password_repeat");
+				add_location(label3, file$9, 252, 28, 8308);
+				attr_dev(input3, "type", "password");
+				attr_dev(input3, "class", "form-control t");
+				attr_dev(input3, "id", "teacher-password_repeat");
+				attr_dev(input3, "name", "password_repeat");
+				add_location(input3, file$9, 253, 28, 8429);
+				attr_dev(div13, "class", "w-auto");
+				add_location(div13, file$9, 251, 24, 8258);
+				attr_dev(div14, "class", "d-flex mb-2");
+				add_location(div14, file$9, 245, 20, 7900);
+				attr_dev(span8, "class", "required");
+				add_location(span8, file$9, 258, 65, 8702);
+				attr_dev(label4, "for", "teacher-full_name");
+				add_location(label4, file$9, 258, 24, 8661);
+				attr_dev(input4, "type", "text");
+				attr_dev(input4, "class", "form-control t");
+				attr_dev(input4, "id", "teacher-full_name");
+				attr_dev(input4, "name", "full_name");
+				add_location(input4, file$9, 259, 24, 8767);
+				attr_dev(div15, "class", "form-group");
+				add_location(div15, file$9, 257, 20, 8611);
+				attr_dev(span9, "class", "required");
+				add_location(span9, file$9, 264, 61, 9060);
+				attr_dev(label5, "for", "teacher-skype");
+				add_location(label5, file$9, 264, 28, 9027);
+				attr_dev(input5, "type", "text");
+				attr_dev(input5, "class", "form-control t");
+				attr_dev(input5, "id", "teacher-skype");
+				attr_dev(input5, "name", "skype");
+				add_location(input5, file$9, 265, 28, 9129);
+				attr_dev(div16, "class", "w-auto mr-2");
+				add_location(div16, file$9, 263, 24, 8972);
+				attr_dev(span10, "class", "required");
+				add_location(span10, file$9, 269, 73, 9358);
+				attr_dev(label6, "for", "teacher-salary");
+				add_location(label6, file$9, 269, 28, 9313);
+				attr_dev(input6, "type", "text");
+				attr_dev(input6, "class", "form-control t");
+				attr_dev(input6, "id", "teacher-salary");
+				attr_dev(input6, "name", "salary");
+				add_location(input6, file$9, 270, 28, 9427);
+				attr_dev(div17, "class", "w-auto");
+				add_location(div17, file$9, 268, 24, 9263);
+				attr_dev(div18, "class", "d-flex mb-2");
+				add_location(div18, file$9, 262, 20, 8921);
+				attr_dev(span11, "class", "required");
+				add_location(span11, file$9, 275, 91, 9704);
+				attr_dev(label7, "for", "teacher-educational_attainment");
+				add_location(label7, file$9, 275, 24, 9637);
+				attr_dev(select, "class", "form-control t");
+				attr_dev(select, "id", "teacher-educational_attainment");
+				attr_dev(select, "name", "educational_attainment");
+				add_location(select, file$9, 276, 24, 9769);
+				attr_dev(div19, "class", "form-group");
+				add_location(div19, file$9, 274, 20, 9587);
+				attr_dev(button5, "type", "submit");
+				attr_dev(button5, "class", "btn btn-success t");
+				add_location(button5, file$9, 283, 20, 10123);
+				attr_dev(button6, "type", "button");
+				attr_dev(button6, "class", "btn btn-secondary");
+				attr_dev(button6, "data-dismiss", "modal");
+				add_location(button6, file$9, 284, 20, 10205);
+				form.noValidate = true;
+				add_location(form, file$9, 234, 16, 7256);
+				attr_dev(div20, "class", "modal-body");
+				add_location(div20, file$9, 213, 12, 6484);
+				attr_dev(div21, "class", "modal-content");
+				add_location(div21, file$9, 206, 8, 6158);
+				attr_dev(div22, "class", "modal-dialog");
+				attr_dev(div22, "role", "document");
+				add_location(div22, file$9, 205, 4, 6106);
+				attr_dev(div23, "class", "modal fade");
+				attr_dev(div23, "id", "add-modal");
+				attr_dev(div23, "data-backdrop", "static");
+				add_location(div23, file$9, 204, 0, 6038);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div2, anchor);
+				append_dev(div2, div0);
+				append_dev(div0, h2);
+				append_dev(div2, t1);
+				append_dev(div2, div1);
+				append_dev(div1, button0);
+				mount_component(userplusicon, button0, null);
+				append_dev(button0, t2);
+				insert_dev(target, t3, anchor);
+				if_blocks[current_block_type_index].m(target, anchor);
+				insert_dev(target, t4, anchor);
+				insert_dev(target, div8, anchor);
+				append_dev(div8, div7);
+				append_dev(div7, div6);
+				append_dev(div6, div3);
+				append_dev(div3, h50);
+				append_dev(div3, t6);
+				append_dev(div3, button1);
+				append_dev(button1, span0);
+				append_dev(div6, t8);
+				append_dev(div6, div4);
+				if (if_block1) if_block1.m(div4, null);
+				append_dev(div4, t9);
+				append_dev(div4, mark);
+				append_dev(mark, t10);
+				append_dev(div4, t11);
+				append_dev(div6, t12);
+				append_dev(div6, div5);
+				append_dev(div5, button2);
+				append_dev(div5, t14);
+				append_dev(div5, button3);
+				insert_dev(target, t16, anchor);
+				insert_dev(target, div23, anchor);
+				append_dev(div23, div22);
+				append_dev(div22, div21);
+				append_dev(div21, div9);
+				append_dev(div9, h51);
+				append_dev(div9, t18);
+				append_dev(div9, button4);
+				append_dev(button4, span1);
+				append_dev(div21, t20);
+				append_dev(div21, div20);
+				append_dev(div20, span3);
+				append_dev(span3, span2);
+				append_dev(span3, t22);
+				append_dev(div20, t23);
+				if (if_block2) if_block2.m(div20, null);
+				append_dev(div20, t24);
+				if (if_block3) if_block3.m(div20, null);
+				append_dev(div20, t25);
+				append_dev(div20, form);
+				append_dev(form, div10);
+				append_dev(div10, label0);
+				append_dev(label0, t26);
+				append_dev(label0, span4);
+				append_dev(div10, t28);
+				append_dev(div10, input0);
+				append_dev(form, t29);
+				append_dev(form, div11);
+				append_dev(div11, label1);
+				append_dev(label1, t30);
+				append_dev(label1, span5);
+				append_dev(div11, t32);
+				append_dev(div11, input1);
+				append_dev(form, t33);
+				append_dev(form, div14);
+				append_dev(div14, div12);
+				append_dev(div12, label2);
+				append_dev(label2, t34);
+				append_dev(label2, span6);
+				append_dev(div12, t36);
+				append_dev(div12, input2);
+				append_dev(div14, t37);
+				append_dev(div14, div13);
+				append_dev(div13, label3);
+				append_dev(label3, t38);
+				append_dev(label3, span7);
+				append_dev(div13, t40);
+				append_dev(div13, input3);
+				append_dev(form, t41);
+				append_dev(form, div15);
+				append_dev(div15, label4);
+				append_dev(label4, t42);
+				append_dev(label4, span8);
+				append_dev(div15, t44);
+				append_dev(div15, input4);
+				append_dev(form, t45);
+				append_dev(form, div18);
+				append_dev(div18, div16);
+				append_dev(div16, label5);
+				append_dev(label5, t46);
+				append_dev(label5, span9);
+				append_dev(div16, t48);
+				append_dev(div16, input5);
+				append_dev(div18, t49);
+				append_dev(div18, div17);
+				append_dev(div17, label6);
+				append_dev(label6, t50);
+				append_dev(label6, span10);
+				append_dev(div17, t52);
+				append_dev(div17, input6);
+				append_dev(form, t53);
+				append_dev(form, div19);
+				append_dev(div19, label7);
+				append_dev(label7, t54);
+				append_dev(label7, span11);
+				append_dev(div19, t56);
+				append_dev(div19, select);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].m(select, null);
+				}
+
+				append_dev(form, t57);
+				append_dev(form, button5);
+				append_dev(form, t59);
+				append_dev(form, button6);
+				current = true;
+
+				dispose = [
+					listen_dev(
+						button3,
+						"click",
+						prevent_default(function () {
+							if (is_function(/*removeTeacher*/ ctx[11](/*tmp*/ ctx[6].id))) /*removeTeacher*/ ctx[11](/*tmp*/ ctx[6].id).apply(this, arguments);
+						}),
+						false,
+						true,
+						false
+					),
+					listen_dev(form, "submit", prevent_default(/*submitAddTeacher*/ ctx[9]), false, true, false)
+				];
+			},
+			p: function update(new_ctx, [dirty]) {
+				ctx = new_ctx;
+				let previous_block_index = current_block_type_index;
+				current_block_type_index = select_block_type(ctx);
+
+				if (current_block_type_index === previous_block_index) {
+					if_blocks[current_block_type_index].p(ctx, dirty);
+				} else {
+					group_outros();
+
+					transition_out(if_blocks[previous_block_index], 1, 1, () => {
+						if_blocks[previous_block_index] = null;
+					});
+
+					check_outros();
+					if_block0 = if_blocks[current_block_type_index];
+
+					if (!if_block0) {
+						if_block0 = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+						if_block0.c();
+					}
+
+					transition_in(if_block0, 1);
+					if_block0.m(t4.parentNode, t4);
+				}
+
+				if (/*removeSuccess*/ ctx[7]) {
+					if (!if_block1) {
+						if_block1 = create_if_block_2(ctx);
+						if_block1.c();
+						if_block1.m(div4, t9);
+					}
+				} else if (if_block1) {
+					if_block1.d(1);
+					if_block1 = null;
+				}
+
+				if ((!current || dirty & /*tmp*/ 64) && t10_value !== (t10_value = /*tmp*/ ctx[6].full_name + "")) set_data_dev(t10, t10_value);
+
+				if (/*addErrors*/ ctx[4].length > 0) {
+					if (if_block2) {
+						if_block2.p(ctx, dirty);
+					} else {
+						if_block2 = create_if_block_1(ctx);
+						if_block2.c();
+						if_block2.m(div20, t24);
+					}
+				} else if (if_block2) {
+					if_block2.d(1);
+					if_block2 = null;
+				}
+
+				if (/*addSuccess*/ ctx[5]) {
+					if (!if_block3) {
+						if_block3 = create_if_block$1(ctx);
+						if_block3.c();
+						if_block3.m(div20, t25);
+					}
+				} else if (if_block3) {
+					if_block3.d(1);
+					if_block3 = null;
+				}
+
+				if (dirty & /*educationalAttainment*/ 8) {
+					each_value = /*educationalAttainment*/ ctx[3];
+					validate_each_argument(each_value);
+					let i;
+
+					for (i = 0; i < each_value.length; i += 1) {
+						const child_ctx = get_each_context(ctx, each_value, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+						} else {
+							each_blocks[i] = create_each_block(child_ctx);
+							each_blocks[i].c();
+							each_blocks[i].m(select, null);
+						}
+					}
+
+					for (; i < each_blocks.length; i += 1) {
+						each_blocks[i].d(1);
+					}
+
+					each_blocks.length = each_value.length;
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(userplusicon.$$.fragment, local);
+				transition_in(if_block0);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(userplusicon.$$.fragment, local);
+				transition_out(if_block0);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div2);
+				destroy_component(userplusicon);
+				if (detaching) detach_dev(t3);
+				if_blocks[current_block_type_index].d(detaching);
+				if (detaching) detach_dev(t4);
+				if (detaching) detach_dev(div8);
+				if (if_block1) if_block1.d();
+				if (detaching) detach_dev(t16);
+				if (detaching) detach_dev(div23);
+				if (if_block2) if_block2.d();
+				if (if_block3) if_block3.d();
+				destroy_each(each_blocks, detaching);
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$a.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$a($$self, $$props, $$invalidate) {
+		let isInitiated = false, teachers = [], filteredTeachers = [];
+
+		onMount(async () => {
+			try {
+				const xhr = await axios$1.get("./teachers");
+
+				xhr.data.forEach(data => {
+					teachers = [...teachers, data];
+				});
+
+				$$invalidate(1, filteredTeachers = teachers);
+				$$invalidate(0, isInitiated = true);
+			} catch(e) {
+				
+			} // ERROR
+		});
+
+		let keywords;
+
+		const searchTeacher = underscore.debounce(
+			async () => {
+				if (keywords.length) {
+					$$invalidate(1, filteredTeachers = teachers.filter(teacher => {
+						const regexp = new RegExp(`(${keywords})`, "i");
+						return regexp.test(teacher.full_name) || regexp.test(teacher.username) || regexp.test(teacher.email) || regexp.test(teacher.skype);
+					}));
+				} else {
+					$$invalidate(1, filteredTeachers = teachers);
+				}
+			},
+			700
+		);
+
+		let educationalAttainment = [];
+		const eaXHR = axios$1.get("./teacher/educational-attainment");
+
+		eaXHR.then(r => {
+			$$invalidate(3, educationalAttainment = r.data);
+		});
+
+		let addErrors = [], addSuccess = false;
+
+		async function submitAddTeacher(evt) {
+			const fields = jquery(".t");
+			const data = new FormData(evt.target);
+			fields.prop("disabled", true);
+
+			try {
+				const xhr = await axios$1.post("./teachers", data);
+				$$invalidate(4, addErrors = []);
+				$$invalidate(5, addSuccess = true);
+
+				setTimeout(
+					() => {
+						jquery("#add-modal").modal("hide");
+						top.location.href = "#/teacher/?id=" + xhr.data.id;
+					},
+					1000
+				);
+			} catch(e) {
+				if (e.response.status == 422) {
+					const errors = e.response.data.errors;
+					$$invalidate(4, addErrors = []);
+					fields.removeClass("is-invalid");
+
+					for (let i in errors) {
+						jquery(`#teacher-${i}`).addClass("is-invalid");
+						$$invalidate(4, addErrors = [...addErrors, errors[i][0]]);
+					}
+				}
+			}
+
+			fields.prop("disabled", false);
+			return false;
+		}
+
+		let tmp = {}, removeSuccess = false;
+
+		function showConfirmRemove(teacher) {
+			$$invalidate(6, tmp = teacher);
+			jquery("#remove-modal").modal("show");
+		}
+
+		async function removeTeacher(id) {
+			try {
+				const xhr = await axios$1.post(`./teachers/${id}`, { _method: "DELETE" });
+				$$invalidate(7, removeSuccess = true);
+
+				setTimeout(
+					() => {
+						top.location.reload();
+					},
+					1000
+				);
+			} catch(e) {
+				// ERROR
+				alert("Error: Unable to delete teacher");
+			}
+		}
+
+		const writable_props = [];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Teachers> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("Teachers", $$slots, []);
+
+		function input_input_handler() {
+			keywords = this.value;
+			$$invalidate(2, keywords);
+		}
+
+		const click_handler = teacher => {
+			showConfirmRemove(teacher);
+		};
+
+		$$self.$capture_state = () => ({
+			_: underscore,
+			onMount,
+			axios: axios$1,
+			jq: jquery,
+			UserPlusIcon,
+			MailIcon,
+			PhoneIcon,
+			UserIcon,
+			UserXIcon,
+			isInitiated,
+			teachers,
+			filteredTeachers,
+			keywords,
+			searchTeacher,
+			educationalAttainment,
+			eaXHR,
+			addErrors,
+			addSuccess,
+			submitAddTeacher,
+			tmp,
+			removeSuccess,
+			showConfirmRemove,
+			removeTeacher
+		});
+
+		$$self.$inject_state = $$props => {
+			if ("isInitiated" in $$props) $$invalidate(0, isInitiated = $$props.isInitiated);
+			if ("teachers" in $$props) teachers = $$props.teachers;
+			if ("filteredTeachers" in $$props) $$invalidate(1, filteredTeachers = $$props.filteredTeachers);
+			if ("keywords" in $$props) $$invalidate(2, keywords = $$props.keywords);
+			if ("educationalAttainment" in $$props) $$invalidate(3, educationalAttainment = $$props.educationalAttainment);
+			if ("addErrors" in $$props) $$invalidate(4, addErrors = $$props.addErrors);
+			if ("addSuccess" in $$props) $$invalidate(5, addSuccess = $$props.addSuccess);
+			if ("tmp" in $$props) $$invalidate(6, tmp = $$props.tmp);
+			if ("removeSuccess" in $$props) $$invalidate(7, removeSuccess = $$props.removeSuccess);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [
+			isInitiated,
+			filteredTeachers,
+			keywords,
+			educationalAttainment,
+			addErrors,
+			addSuccess,
+			tmp,
+			removeSuccess,
+			searchTeacher,
+			submitAddTeacher,
+			showConfirmRemove,
+			removeTeacher,
+			teachers,
+			eaXHR,
+			input_input_handler,
+			click_handler
+		];
+	}
+
+	class Teachers extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$a, create_fragment$a, safe_not_equal, {});
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "Teachers",
+				options,
+				id: create_fragment$a.name
+			});
+		}
+	}
+
+	/* src\routes\Students.svelte generated by Svelte v3.19.2 */
+	const file$a = "src\\routes\\Students.svelte";
+
+	function get_each_context$1(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[11] = list[i];
+		return child_ctx;
+	}
+
+	// (119:16) {#if isAddSuccess}
+	function create_if_block_1$1(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Successfully created student. Redirecting...";
+				attr_dev(div, "class", "alert alert-success mb-3");
+				add_location(div, file$a, 119, 20, 3388);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1$1.name,
+			type: "if",
+			source: "(119:16) {#if isAddSuccess}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (206:0) {:else}
+	function create_else_block$2(ctx) {
+		let div;
+		let span;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				span = element("span");
+				span.textContent = "Loading...";
+				attr_dev(span, "class", "sr-only");
+				add_location(span, file$a, 207, 8, 7306);
+				attr_dev(div, "class", "spinner-border");
+				attr_dev(div, "role", "status");
+				add_location(div, file$a, 206, 4, 7254);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+				append_dev(div, span);
+			},
+			p: noop,
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block$2.name,
+			type: "else",
+			source: "(206:0) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (171:0) {#if isInitiated}
+	function create_if_block$2(ctx) {
+		let input;
+		let t0;
+		let table;
+		let thead;
+		let tr;
+		let th0;
+		let t2;
+		let th1;
+		let t4;
+		let th2;
+		let t6;
+		let th3;
+		let t8;
+		let th4;
+		let t9;
+		let tbody;
+		let current;
+		let dispose;
+		let each_value = /*filteredStudents*/ ctx[1];
+		validate_each_argument(each_value);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value.length; i += 1) {
+			each_blocks[i] = create_each_block$1(get_each_context$1(ctx, each_value, i));
+		}
+
+		const out = i => transition_out(each_blocks[i], 1, 1, () => {
+			each_blocks[i] = null;
+		});
+
+		const block = {
+			c: function create() {
+				input = element("input");
+				t0 = space();
+				table = element("table");
+				thead = element("thead");
+				tr = element("tr");
+				th0 = element("th");
+				th0.textContent = "#";
+				t2 = space();
+				th1 = element("th");
+				th1.textContent = "Full Name";
+				t4 = space();
+				th2 = element("th");
+				th2.textContent = "Username";
+				t6 = space();
+				th3 = element("th");
+				th3.textContent = "Skype";
+				t8 = space();
+				th4 = element("th");
+				t9 = space();
+				tbody = element("tbody");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				attr_dev(input, "type", "text");
+				attr_dev(input, "class", "form-control form-control-lg");
+				attr_dev(input, "placeholder", "Search Student");
+				add_location(input, file$a, 171, 4, 6069);
+				add_location(th0, file$a, 176, 16, 6309);
+				add_location(th1, file$a, 177, 16, 6337);
+				add_location(th2, file$a, 178, 16, 6373);
+				add_location(th3, file$a, 179, 16, 6408);
+				add_location(th4, file$a, 180, 16, 6440);
+				add_location(tr, file$a, 175, 12, 6287);
+				attr_dev(thead, "class", "thead-dark");
+				add_location(thead, file$a, 174, 8, 6247);
+				add_location(tbody, file$a, 183, 8, 6496);
+				attr_dev(table, "class", "table mt-4");
+				add_location(table, file$a, 173, 4, 6211);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, input, anchor);
+				set_input_value(input, /*keywords*/ ctx[2]);
+				insert_dev(target, t0, anchor);
+				insert_dev(target, table, anchor);
+				append_dev(table, thead);
+				append_dev(thead, tr);
+				append_dev(tr, th0);
+				append_dev(tr, t2);
+				append_dev(tr, th1);
+				append_dev(tr, t4);
+				append_dev(tr, th2);
+				append_dev(tr, t6);
+				append_dev(tr, th3);
+				append_dev(tr, t8);
+				append_dev(tr, th4);
+				append_dev(table, t9);
+				append_dev(table, tbody);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].m(tbody, null);
+				}
+
+				current = true;
+
+				dispose = [
+					listen_dev(input, "input", /*input_input_handler*/ ctx[10]),
+					listen_dev(input, "keyup", /*searchStudent*/ ctx[5], false, false, false)
+				];
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*keywords*/ 4 && input.value !== /*keywords*/ ctx[2]) {
+					set_input_value(input, /*keywords*/ ctx[2]);
+				}
+
+				if (dirty & /*filteredStudents*/ 2) {
+					each_value = /*filteredStudents*/ ctx[1];
+					validate_each_argument(each_value);
+					let i;
+
+					for (i = 0; i < each_value.length; i += 1) {
+						const child_ctx = get_each_context$1(ctx, each_value, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+							transition_in(each_blocks[i], 1);
+						} else {
+							each_blocks[i] = create_each_block$1(child_ctx);
+							each_blocks[i].c();
+							transition_in(each_blocks[i], 1);
+							each_blocks[i].m(tbody, null);
+						}
+					}
+
+					group_outros();
+
+					for (i = each_value.length; i < each_blocks.length; i += 1) {
+						out(i);
+					}
+
+					check_outros();
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+
+				for (let i = 0; i < each_value.length; i += 1) {
+					transition_in(each_blocks[i]);
+				}
+
+				current = true;
+			},
+			o: function outro(local) {
+				each_blocks = each_blocks.filter(Boolean);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					transition_out(each_blocks[i]);
+				}
+
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(input);
+				if (detaching) detach_dev(t0);
+				if (detaching) detach_dev(table);
+				destroy_each(each_blocks, detaching);
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block$2.name,
+			type: "if",
+			source: "(171:0) {#if isInitiated}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (185:12) {#each filteredStudents as student}
+	function create_each_block$1(ctx) {
+		let tr;
+		let td0;
+		let t0_value = /*student*/ ctx[11].id + "";
+		let t0;
+		let t1;
+		let td1;
+		let t2;
+		let a0;
+		let t3_value = /*student*/ ctx[11].full_name + "";
+		let t3;
+		let a0_href_value;
+		let t4;
+		let td2;
+		let t5_value = /*student*/ ctx[11].username + "";
+		let t5;
+		let t6;
+		let td3;
+		let t7;
+		let a1;
+		let t8_value = /*student*/ ctx[11].skype + "";
+		let t8;
+		let a1_href_value;
+		let t9;
+		let td4;
+		let t11;
+		let current;
+		const usericon = new UserIcon({ $$inline: true });
+		const phoneicon = new PhoneIcon({ $$inline: true });
+
+		const block = {
+			c: function create() {
+				tr = element("tr");
+				td0 = element("td");
+				t0 = text(t0_value);
+				t1 = space();
+				td1 = element("td");
+				create_component(usericon.$$.fragment);
+				t2 = space();
+				a0 = element("a");
+				t3 = text(t3_value);
+				t4 = space();
+				td2 = element("td");
+				t5 = text(t5_value);
+				t6 = space();
+				td3 = element("td");
+				create_component(phoneicon.$$.fragment);
+				t7 = space();
+				a1 = element("a");
+				t8 = text(t8_value);
+				t9 = space();
+				td4 = element("td");
+				td4.textContent = "...";
+				t11 = space();
+				add_location(td0, file$a, 186, 20, 6596);
+				attr_dev(a0, "href", a0_href_value = "#/student/?id=" + /*student*/ ctx[11].id);
+				add_location(a0, file$a, 189, 24, 6707);
+				add_location(td1, file$a, 187, 20, 6639);
+				add_location(td2, file$a, 193, 20, 6872);
+				attr_dev(a1, "href", a1_href_value = "skype:" + /*student*/ ctx[11].skype + "?chat");
+				add_location(a1, file$a, 196, 24, 6990);
+				add_location(td3, file$a, 194, 20, 6921);
+				add_location(td4, file$a, 200, 20, 7151);
+				add_location(tr, file$a, 185, 16, 6570);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, tr, anchor);
+				append_dev(tr, td0);
+				append_dev(td0, t0);
+				append_dev(tr, t1);
+				append_dev(tr, td1);
+				mount_component(usericon, td1, null);
+				append_dev(td1, t2);
+				append_dev(td1, a0);
+				append_dev(a0, t3);
+				append_dev(tr, t4);
+				append_dev(tr, td2);
+				append_dev(td2, t5);
+				append_dev(tr, t6);
+				append_dev(tr, td3);
+				mount_component(phoneicon, td3, null);
+				append_dev(td3, t7);
+				append_dev(td3, a1);
+				append_dev(a1, t8);
+				append_dev(tr, t9);
+				append_dev(tr, td4);
+				append_dev(tr, t11);
+				current = true;
+			},
+			p: function update(ctx, dirty) {
+				if ((!current || dirty & /*filteredStudents*/ 2) && t0_value !== (t0_value = /*student*/ ctx[11].id + "")) set_data_dev(t0, t0_value);
+				if ((!current || dirty & /*filteredStudents*/ 2) && t3_value !== (t3_value = /*student*/ ctx[11].full_name + "")) set_data_dev(t3, t3_value);
+
+				if (!current || dirty & /*filteredStudents*/ 2 && a0_href_value !== (a0_href_value = "#/student/?id=" + /*student*/ ctx[11].id)) {
+					attr_dev(a0, "href", a0_href_value);
+				}
+
+				if ((!current || dirty & /*filteredStudents*/ 2) && t5_value !== (t5_value = /*student*/ ctx[11].username + "")) set_data_dev(t5, t5_value);
+				if ((!current || dirty & /*filteredStudents*/ 2) && t8_value !== (t8_value = /*student*/ ctx[11].skype + "")) set_data_dev(t8, t8_value);
+
+				if (!current || dirty & /*filteredStudents*/ 2 && a1_href_value !== (a1_href_value = "skype:" + /*student*/ ctx[11].skype + "?chat")) {
+					attr_dev(a1, "href", a1_href_value);
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(usericon.$$.fragment, local);
+				transition_in(phoneicon.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(usericon.$$.fragment, local);
+				transition_out(phoneicon.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(tr);
+				destroy_component(usericon);
+				destroy_component(phoneicon);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block$1.name,
+			type: "each",
+			source: "(185:12) {#each filteredStudents as student}",
+			ctx
+		});
+
+		return block;
+	}
+
+	function create_fragment$b(ctx) {
+		let div2;
+		let div0;
+		let h2;
+		let t1;
+		let div1;
+		let button0;
+		let t2;
+		let t3;
+		let div20;
+		let div19;
+		let div18;
+		let div3;
+		let h5;
+		let t5;
+		let button1;
+		let span0;
+		let t7;
+		let div16;
+		let span2;
+		let span1;
+		let t9;
+		let t10;
+		let t11;
+		let form;
+		let div5;
+		let label0;
+		let t12;
+		let span3;
+		let t14;
+		let input0;
+		let t15;
+		let div4;
+		let t16;
+		let div7;
+		let label1;
+		let t17;
+		let span4;
+		let t19;
+		let input1;
+		let t20;
+		let div6;
+		let t21;
+		let div9;
+		let label2;
+		let t22;
+		let span5;
+		let t24;
+		let input2;
+		let t25;
+		let div8;
+		let t26;
+		let div11;
+		let label3;
+		let t27;
+		let span6;
+		let t29;
+		let input3;
+		let t30;
+		let div10;
+		let t31;
+		let div13;
+		let label4;
+		let t32;
+		let span7;
+		let t34;
+		let input4;
+		let t35;
+		let div12;
+		let t36;
+		let div15;
+		let label5;
+		let t37;
+		let span8;
+		let t39;
+		let input5;
+		let t40;
+		let div14;
+		let t41;
+		let div17;
+		let button2;
+		let t43;
+		let button3;
+		let t45;
+		let current_block_type_index;
+		let if_block1;
+		let if_block1_anchor;
+		let current;
+		let dispose;
+		const userplusicon = new UserPlusIcon({ $$inline: true });
+		let if_block0 = /*isAddSuccess*/ ctx[4] && create_if_block_1$1(ctx);
+		const if_block_creators = [create_if_block$2, create_else_block$2];
+		const if_blocks = [];
+
+		function select_block_type(ctx, dirty) {
+			if (/*isInitiated*/ ctx[0]) return 0;
+			return 1;
+		}
+
+		current_block_type_index = select_block_type(ctx);
+		if_block1 = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+
+		const block = {
+			c: function create() {
+				div2 = element("div");
+				div0 = element("div");
+				h2 = element("h2");
+				h2.textContent = "Students";
+				t1 = space();
+				div1 = element("div");
+				button0 = element("button");
+				create_component(userplusicon.$$.fragment);
+				t2 = text(" Add Student");
+				t3 = space();
+				div20 = element("div");
+				div19 = element("div");
+				div18 = element("div");
+				div3 = element("div");
+				h5 = element("h5");
+				h5.textContent = "Add Student";
+				t5 = space();
+				button1 = element("button");
+				span0 = element("span");
+				span0.textContent = "×";
+				t7 = space();
+				div16 = element("div");
+				span2 = element("span");
+				span1 = element("span");
+				span1.textContent = "*";
+				t9 = text(" Required fields");
+				t10 = space();
+				if (if_block0) if_block0.c();
+				t11 = space();
+				form = element("form");
+				div5 = element("div");
+				label0 = element("label");
+				t12 = text("Username ");
+				span3 = element("span");
+				span3.textContent = "*";
+				t14 = space();
+				input0 = element("input");
+				t15 = space();
+				div4 = element("div");
+				t16 = space();
+				div7 = element("div");
+				label1 = element("label");
+				t17 = text("Password ");
+				span4 = element("span");
+				span4.textContent = "*";
+				t19 = space();
+				input1 = element("input");
+				t20 = space();
+				div6 = element("div");
+				t21 = space();
+				div9 = element("div");
+				label2 = element("label");
+				t22 = text("Password ");
+				span5 = element("span");
+				span5.textContent = "*";
+				t24 = space();
+				input2 = element("input");
+				t25 = space();
+				div8 = element("div");
+				t26 = space();
+				div11 = element("div");
+				label3 = element("label");
+				t27 = text("Full Name ");
+				span6 = element("span");
+				span6.textContent = "*";
+				t29 = space();
+				input3 = element("input");
+				t30 = space();
+				div10 = element("div");
+				t31 = space();
+				div13 = element("div");
+				label4 = element("label");
+				t32 = text("Email ");
+				span7 = element("span");
+				span7.textContent = "*";
+				t34 = space();
+				input4 = element("input");
+				t35 = space();
+				div12 = element("div");
+				t36 = space();
+				div15 = element("div");
+				label5 = element("label");
+				t37 = text("Skype ");
+				span8 = element("span");
+				span8.textContent = "*";
+				t39 = space();
+				input5 = element("input");
+				t40 = space();
+				div14 = element("div");
+				t41 = space();
+				div17 = element("div");
+				button2 = element("button");
+				button2.textContent = "Close";
+				t43 = space();
+				button3 = element("button");
+				button3.textContent = "Create";
+				t45 = space();
+				if_block1.c();
+				if_block1_anchor = empty();
+				attr_dev(h2, "class", "display-4");
+				add_location(h2, file$a, 94, 8, 2467);
+				add_location(div0, file$a, 93, 4, 2452);
+				attr_dev(button0, "type", "button");
+				attr_dev(button0, "class", "btn btn-secondary btn-lg");
+				attr_dev(button0, "data-toggle", "modal");
+				attr_dev(button0, "data-target", "#add-modal");
+				add_location(button0, file$a, 98, 8, 2537);
+				add_location(div1, file$a, 97, 4, 2522);
+				attr_dev(div2, "class", "d-flex justify-content-between align-items-center");
+				add_location(div2, file$a, 92, 0, 2383);
+				attr_dev(h5, "class", "modal-title");
+				add_location(h5, file$a, 108, 16, 2941);
+				add_location(span0, file$a, 110, 20, 3078);
+				attr_dev(button1, "type", "button");
+				attr_dev(button1, "class", "close");
+				attr_dev(button1, "data-dismiss", "modal");
+				add_location(button1, file$a, 109, 16, 2999);
+				attr_dev(div3, "class", "modal-header");
+				add_location(div3, file$a, 107, 12, 2897);
+				attr_dev(span1, "class", "required");
+				add_location(span1, file$a, 115, 20, 3256);
+				attr_dev(span2, "class", "text-muted af mb-2 svelte-1jqk8uy");
+				add_location(span2, file$a, 114, 16, 3201);
+				attr_dev(span3, "class", "required");
+				add_location(span3, file$a, 126, 59, 3711);
+				attr_dev(label0, "for", "add_username");
+				add_location(label0, file$a, 126, 24, 3676);
+				attr_dev(input0, "type", "text");
+				attr_dev(input0, "class", "form-control t");
+				attr_dev(input0, "id", "add_username");
+				attr_dev(input0, "name", "username");
+				add_location(input0, file$a, 127, 24, 3776);
+				attr_dev(div4, "id", "fb-username");
+				attr_dev(div4, "class", "d-none");
+				add_location(div4, file$a, 128, 24, 3878);
+				attr_dev(div5, "class", "form-group");
+				add_location(div5, file$a, 125, 20, 3626);
+				attr_dev(span4, "class", "required");
+				add_location(span4, file$a, 132, 59, 4058);
+				attr_dev(label1, "for", "add_password");
+				add_location(label1, file$a, 132, 24, 4023);
+				attr_dev(input1, "type", "password");
+				attr_dev(input1, "class", "form-control t");
+				attr_dev(input1, "id", "add_password");
+				attr_dev(input1, "name", "password");
+				add_location(input1, file$a, 133, 24, 4123);
+				attr_dev(div6, "id", "fb-password");
+				attr_dev(div6, "class", "d-none");
+				add_location(div6, file$a, 134, 24, 4229);
+				attr_dev(div7, "class", "form-group");
+				add_location(div7, file$a, 131, 20, 3973);
+				attr_dev(span5, "class", "required");
+				add_location(span5, file$a, 138, 66, 4416);
+				attr_dev(label2, "for", "add_password_repeat");
+				add_location(label2, file$a, 138, 24, 4374);
+				attr_dev(input2, "type", "password");
+				attr_dev(input2, "class", "form-control t");
+				attr_dev(input2, "id", "add_password_repeat");
+				attr_dev(input2, "name", "password_repeat");
+				add_location(input2, file$a, 139, 24, 4481);
+				attr_dev(div8, "id", "fb-password_repeat");
+				attr_dev(div8, "class", "d-none");
+				add_location(div8, file$a, 140, 24, 4601);
+				attr_dev(div9, "class", "form-group");
+				add_location(div9, file$a, 137, 20, 4324);
+				attr_dev(span6, "class", "required");
+				add_location(span6, file$a, 144, 61, 4790);
+				attr_dev(label3, "for", "add_full_name");
+				add_location(label3, file$a, 144, 24, 4753);
+				attr_dev(input3, "type", "text");
+				attr_dev(input3, "class", "form-control t");
+				attr_dev(input3, "id", "add_full_name");
+				attr_dev(input3, "name", "full_name");
+				add_location(input3, file$a, 145, 24, 4855);
+				attr_dev(div10, "id", "fb-full_name");
+				attr_dev(div10, "class", "d-none");
+				add_location(div10, file$a, 146, 24, 4959);
+				attr_dev(div11, "class", "form-group");
+				add_location(div11, file$a, 143, 20, 4703);
+				attr_dev(span7, "class", "required");
+				add_location(span7, file$a, 150, 53, 5134);
+				attr_dev(label4, "for", "add_email");
+				add_location(label4, file$a, 150, 24, 5105);
+				attr_dev(input4, "type", "email");
+				attr_dev(input4, "class", "form-control t");
+				attr_dev(input4, "id", "add_email");
+				attr_dev(input4, "name", "email");
+				add_location(input4, file$a, 151, 24, 5199);
+				attr_dev(div12, "id", "fb-email");
+				attr_dev(div12, "class", "d-none");
+				add_location(div12, file$a, 152, 24, 5296);
+				attr_dev(div13, "class", "form-group");
+				add_location(div13, file$a, 149, 20, 5055);
+				attr_dev(span8, "class", "required");
+				add_location(span8, file$a, 156, 53, 5467);
+				attr_dev(label5, "for", "add_skype");
+				add_location(label5, file$a, 156, 24, 5438);
+				attr_dev(input5, "type", "text");
+				attr_dev(input5, "class", "form-control t");
+				attr_dev(input5, "id", "add_skype");
+				attr_dev(input5, "name", "skype");
+				add_location(input5, file$a, 157, 24, 5532);
+				attr_dev(div14, "id", "fb-skype");
+				attr_dev(div14, "class", "d-none");
+				add_location(div14, file$a, 158, 24, 5628);
+				attr_dev(div15, "class", "form-group");
+				add_location(div15, file$a, 155, 20, 5388);
+				form.noValidate = true;
+				add_location(form, file$a, 124, 16, 3567);
+				attr_dev(div16, "class", "modal-body");
+				add_location(div16, file$a, 113, 12, 3159);
+				attr_dev(button2, "type", "button");
+				attr_dev(button2, "class", "btn btn-secondary");
+				attr_dev(button2, "data-dismiss", "modal");
+				add_location(button2, file$a, 163, 16, 5799);
+				attr_dev(button3, "type", "button");
+				attr_dev(button3, "class", "btn btn-primary");
+				add_location(button3, file$a, 164, 16, 5900);
+				attr_dev(div17, "class", "modal-footer");
+				add_location(div17, file$a, 162, 12, 5755);
+				attr_dev(div18, "class", "modal-content");
+				add_location(div18, file$a, 106, 8, 2856);
+				attr_dev(div19, "class", "modal-dialog");
+				attr_dev(div19, "role", "document");
+				add_location(div19, file$a, 105, 4, 2804);
+				attr_dev(div20, "class", "modal fade");
+				attr_dev(div20, "id", "add-modal");
+				attr_dev(div20, "data-backdrop", "static");
+				attr_dev(div20, "tabindex", "-1");
+				add_location(div20, file$a, 104, 0, 2722);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div2, anchor);
+				append_dev(div2, div0);
+				append_dev(div0, h2);
+				append_dev(div2, t1);
+				append_dev(div2, div1);
+				append_dev(div1, button0);
+				mount_component(userplusicon, button0, null);
+				append_dev(button0, t2);
+				insert_dev(target, t3, anchor);
+				insert_dev(target, div20, anchor);
+				append_dev(div20, div19);
+				append_dev(div19, div18);
+				append_dev(div18, div3);
+				append_dev(div3, h5);
+				append_dev(div3, t5);
+				append_dev(div3, button1);
+				append_dev(button1, span0);
+				append_dev(div18, t7);
+				append_dev(div18, div16);
+				append_dev(div16, span2);
+				append_dev(span2, span1);
+				append_dev(span2, t9);
+				append_dev(div16, t10);
+				if (if_block0) if_block0.m(div16, null);
+				append_dev(div16, t11);
+				append_dev(div16, form);
+				append_dev(form, div5);
+				append_dev(div5, label0);
+				append_dev(label0, t12);
+				append_dev(label0, span3);
+				append_dev(div5, t14);
+				append_dev(div5, input0);
+				append_dev(div5, t15);
+				append_dev(div5, div4);
+				append_dev(form, t16);
+				append_dev(form, div7);
+				append_dev(div7, label1);
+				append_dev(label1, t17);
+				append_dev(label1, span4);
+				append_dev(div7, t19);
+				append_dev(div7, input1);
+				append_dev(div7, t20);
+				append_dev(div7, div6);
+				append_dev(form, t21);
+				append_dev(form, div9);
+				append_dev(div9, label2);
+				append_dev(label2, t22);
+				append_dev(label2, span5);
+				append_dev(div9, t24);
+				append_dev(div9, input2);
+				append_dev(div9, t25);
+				append_dev(div9, div8);
+				append_dev(form, t26);
+				append_dev(form, div11);
+				append_dev(div11, label3);
+				append_dev(label3, t27);
+				append_dev(label3, span6);
+				append_dev(div11, t29);
+				append_dev(div11, input3);
+				append_dev(div11, t30);
+				append_dev(div11, div10);
+				append_dev(form, t31);
+				append_dev(form, div13);
+				append_dev(div13, label4);
+				append_dev(label4, t32);
+				append_dev(label4, span7);
+				append_dev(div13, t34);
+				append_dev(div13, input4);
+				append_dev(div13, t35);
+				append_dev(div13, div12);
+				append_dev(form, t36);
+				append_dev(form, div15);
+				append_dev(div15, label5);
+				append_dev(label5, t37);
+				append_dev(label5, span8);
+				append_dev(div15, t39);
+				append_dev(div15, input5);
+				append_dev(div15, t40);
+				append_dev(div15, div14);
+				/*form_binding*/ ctx[9](form);
+				append_dev(div18, t41);
+				append_dev(div18, div17);
+				append_dev(div17, button2);
+				append_dev(div17, t43);
+				append_dev(div17, button3);
+				insert_dev(target, t45, anchor);
+				if_blocks[current_block_type_index].m(target, anchor);
+				insert_dev(target, if_block1_anchor, anchor);
+				current = true;
+				dispose = listen_dev(button3, "click", /*submitAddForm*/ ctx[6], false, false, false);
+			},
+			p: function update(ctx, [dirty]) {
+				if (/*isAddSuccess*/ ctx[4]) {
+					if (!if_block0) {
+						if_block0 = create_if_block_1$1(ctx);
+						if_block0.c();
+						if_block0.m(div16, t11);
+					}
+				} else if (if_block0) {
+					if_block0.d(1);
+					if_block0 = null;
+				}
+
+				let previous_block_index = current_block_type_index;
+				current_block_type_index = select_block_type(ctx);
+
+				if (current_block_type_index === previous_block_index) {
+					if_blocks[current_block_type_index].p(ctx, dirty);
+				} else {
+					group_outros();
+
+					transition_out(if_blocks[previous_block_index], 1, 1, () => {
+						if_blocks[previous_block_index] = null;
+					});
+
+					check_outros();
+					if_block1 = if_blocks[current_block_type_index];
+
+					if (!if_block1) {
+						if_block1 = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+						if_block1.c();
+					}
+
+					transition_in(if_block1, 1);
+					if_block1.m(if_block1_anchor.parentNode, if_block1_anchor);
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(userplusicon.$$.fragment, local);
+				transition_in(if_block1);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(userplusicon.$$.fragment, local);
+				transition_out(if_block1);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div2);
+				destroy_component(userplusicon);
+				if (detaching) detach_dev(t3);
+				if (detaching) detach_dev(div20);
+				if (if_block0) if_block0.d();
+				/*form_binding*/ ctx[9](null);
+				if (detaching) detach_dev(t45);
+				if_blocks[current_block_type_index].d(detaching);
+				if (detaching) detach_dev(if_block1_anchor);
+				dispose();
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$b.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$b($$self, $$props, $$invalidate) {
+		let isInitiated = false, students = [], filteredStudents = [];
+
+		onMount(async () => {
+			try {
+				const xhr = await axios$1.get("./students");
+
+				xhr.data.forEach(data => {
+					students = [...students, data];
+				});
+
+				$$invalidate(1, filteredStudents = students);
+				$$invalidate(0, isInitiated = true);
+			} catch(e) {
+				
+			} // ERROR
+		});
+
+		let keywords;
+
+		const searchStudent = underscore.debounce(
+			async () => {
+				if (keywords.length) {
+					$$invalidate(1, filteredStudents = students.filter(student => {
+						const regexp = new RegExp(`(${keywords})`, "i");
+						return regexp.test(student.full_name) || regexp.test(student.username) || regexp.test(student.email) || regexp.test(student.skype);
+					}));
+				} else {
+					$$invalidate(1, filteredStudents = students);
+				}
+			},
+			700
+		);
+
+		let addForm, isAddSuccess = false, addErrors = [];
+
+		async function submitAddForm() {
+			const fields = jquery(".t"), fbs = jquery("[id^=\"fb-\"");
+			fbs.removeClass("invalid-feedback d-block");
+			fbs.addClass("d-none");
+			addErrors = [];
+			const data = new FormData(addForm);
+			fields.prop("disabled", true);
+			fields.removeClass("is-invalid");
+
+			try {
+				const xhr = await axios$1.post("./students", data);
+
+				if (xhr.data.success) {
+					$$invalidate(4, isAddSuccess = true);
+
+					setTimeout(
+						() => {
+							jquery("#add-modal").modal("hide");
+							top.location.href = `#/student/?id=${xhr.data.id}`;
+						},
+						1000
+					);
+				}
+			} catch(e) {
+				if (e.response.status == 422) {
+					hasErrors = true;
+
+					for (let key in e.response.data.errors) {
+						addErrors = [...addErrors, e.response.data.errors[key][0]];
+						jquery(`#add_${key}`).addClass("is-invalid");
+						const fb = jquery(`#fb-${key}`);
+						fb.addClass("invalid-feedback d-block");
+						fb.text(e.response.data.errors[key][0]);
+					}
+				}
+			}
+
+			fields.prop("disabled", false);
+		}
+
+		const writable_props = [];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Students> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("Students", $$slots, []);
+
+		function form_binding($$value) {
+			binding_callbacks[$$value ? "unshift" : "push"](() => {
+				$$invalidate(3, addForm = $$value);
+			});
+		}
+
+		function input_input_handler() {
+			keywords = this.value;
+			$$invalidate(2, keywords);
+		}
+
+		$$self.$capture_state = () => ({
+			_: underscore,
+			onMount,
+			axios: axios$1,
+			jq: jquery,
+			UserPlusIcon,
+			UserIcon,
+			PhoneIcon,
+			isInitiated,
+			students,
+			filteredStudents,
+			keywords,
+			searchStudent,
+			addForm,
+			isAddSuccess,
+			addErrors,
+			submitAddForm
+		});
+
+		$$self.$inject_state = $$props => {
+			if ("isInitiated" in $$props) $$invalidate(0, isInitiated = $$props.isInitiated);
+			if ("students" in $$props) students = $$props.students;
+			if ("filteredStudents" in $$props) $$invalidate(1, filteredStudents = $$props.filteredStudents);
+			if ("keywords" in $$props) $$invalidate(2, keywords = $$props.keywords);
+			if ("addForm" in $$props) $$invalidate(3, addForm = $$props.addForm);
+			if ("isAddSuccess" in $$props) $$invalidate(4, isAddSuccess = $$props.isAddSuccess);
+			if ("addErrors" in $$props) addErrors = $$props.addErrors;
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [
+			isInitiated,
+			filteredStudents,
+			keywords,
+			addForm,
+			isAddSuccess,
+			searchStudent,
+			submitAddForm,
+			students,
+			addErrors,
+			form_binding,
+			input_input_handler
+		];
+	}
+
+	class Students extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$b, create_fragment$b, safe_not_equal, {});
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "Students",
+				options,
+				id: create_fragment$b.name
+			});
+		}
+	}
+
+	/* src\routes\Settings.svelte generated by Svelte v3.19.2 */
+	const file$b = "src\\routes\\Settings.svelte";
+
+	function get_each_context$2(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[23] = list[i];
+		return child_ctx;
+	}
+
+	// (133:0) {:catch}
+	function create_catch_block(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Failed fetching settings register";
+				attr_dev(div, "class", "alert alert-danger");
+				add_location(div, file$b, 133, 4, 3350);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			p: noop,
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_catch_block.name,
+			type: "catch",
+			source: "(133:0) {:catch}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (105:0) {:then settings}
+	function create_then_block(ctx) {
+		let table;
+		let thead;
+		let tr;
+		let th0;
+		let t1;
+		let th1;
+		let t3;
+		let th2;
+		let t4;
+		let tbody;
+		let current;
+		let each_value = /*settings*/ ctx[22].data;
+		validate_each_argument(each_value);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value.length; i += 1) {
+			each_blocks[i] = create_each_block$2(get_each_context$2(ctx, each_value, i));
+		}
+
+		const out = i => transition_out(each_blocks[i], 1, 1, () => {
+			each_blocks[i] = null;
+		});
+
+		const block = {
+			c: function create() {
+				table = element("table");
+				thead = element("thead");
+				tr = element("tr");
+				th0 = element("th");
+				th0.textContent = "Key";
+				t1 = space();
+				th1 = element("th");
+				th1.textContent = "Value";
+				t3 = space();
+				th2 = element("th");
+				t4 = space();
+				tbody = element("tbody");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				add_location(th0, file$b, 108, 16, 2405);
+				add_location(th1, file$b, 109, 16, 2435);
+				add_location(th2, file$b, 110, 16, 2467);
+				add_location(tr, file$b, 107, 12, 2383);
+				attr_dev(thead, "class", "thead-dark");
+				add_location(thead, file$b, 106, 8, 2343);
+				add_location(tbody, file$b, 113, 8, 2523);
+				attr_dev(table, "class", "table table-striped");
+				add_location(table, file$b, 105, 4, 2298);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, table, anchor);
+				append_dev(table, thead);
+				append_dev(thead, tr);
+				append_dev(tr, th0);
+				append_dev(tr, t1);
+				append_dev(tr, th1);
+				append_dev(tr, t3);
+				append_dev(tr, th2);
+				append_dev(table, t4);
+				append_dev(table, tbody);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].m(tbody, null);
+				}
+
+				current = true;
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*showDeleteModal, xhr, showModifyModal*/ 3584) {
+					each_value = /*settings*/ ctx[22].data;
+					validate_each_argument(each_value);
+					let i;
+
+					for (i = 0; i < each_value.length; i += 1) {
+						const child_ctx = get_each_context$2(ctx, each_value, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+							transition_in(each_blocks[i], 1);
+						} else {
+							each_blocks[i] = create_each_block$2(child_ctx);
+							each_blocks[i].c();
+							transition_in(each_blocks[i], 1);
+							each_blocks[i].m(tbody, null);
+						}
+					}
+
+					group_outros();
+
+					for (i = each_value.length; i < each_blocks.length; i += 1) {
+						out(i);
+					}
+
+					check_outros();
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+
+				for (let i = 0; i < each_value.length; i += 1) {
+					transition_in(each_blocks[i]);
+				}
+
+				current = true;
+			},
+			o: function outro(local) {
+				each_blocks = each_blocks.filter(Boolean);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					transition_out(each_blocks[i]);
+				}
+
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(table);
+				destroy_each(each_blocks, detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_then_block.name,
+			type: "then",
+			source: "(105:0) {:then settings}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (115:12) {#each settings.data as setting}
+	function create_each_block$2(ctx) {
+		let tr;
+		let td0;
+		let t0_value = /*setting*/ ctx[23].key + "";
+		let t0;
+		let t1;
+		let td1;
+		let t2_value = /*setting*/ ctx[23].value + "";
+		let t2;
+		let t3;
+		let td2;
+		let div;
+		let a0;
+		let t4;
+		let t5;
+		let a1;
+		let t6;
+		let t7;
+		let current;
+		let dispose;
+		const editicon = new EditIcon({ $$inline: true });
+
+		function click_handler_1(...args) {
+			return /*click_handler_1*/ ctx[17](/*setting*/ ctx[23], ...args);
+		}
+
+		const trash2icon = new Trash2Icon({ $$inline: true });
+
+		function click_handler_2(...args) {
+			return /*click_handler_2*/ ctx[18](/*setting*/ ctx[23], ...args);
+		}
+
+		const block = {
+			c: function create() {
+				tr = element("tr");
+				td0 = element("td");
+				t0 = text(t0_value);
+				t1 = space();
+				td1 = element("td");
+				t2 = text(t2_value);
+				t3 = space();
+				td2 = element("td");
+				div = element("div");
+				a0 = element("a");
+				create_component(editicon.$$.fragment);
+				t4 = text(" Modify");
+				t5 = space();
+				a1 = element("a");
+				create_component(trash2icon.$$.fragment);
+				t6 = text(" Delete");
+				t7 = space();
+				add_location(td0, file$b, 116, 20, 2620);
+				add_location(td1, file$b, 117, 20, 2664);
+				attr_dev(a0, "href", "javascript:;");
+				attr_dev(a0, "class", "btn btn-secondary btn-sm");
+				add_location(a0, file$b, 120, 28, 2793);
+				attr_dev(a1, "href", "javascript:;");
+				attr_dev(a1, "class", "btn btn-secondary btn-sm");
+				add_location(a1, file$b, 123, 28, 3010);
+				attr_dev(div, "class", "btn-group");
+				add_location(div, file$b, 119, 24, 2740);
+				add_location(td2, file$b, 118, 20, 2710);
+				add_location(tr, file$b, 115, 16, 2594);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, tr, anchor);
+				append_dev(tr, td0);
+				append_dev(td0, t0);
+				append_dev(tr, t1);
+				append_dev(tr, td1);
+				append_dev(td1, t2);
+				append_dev(tr, t3);
+				append_dev(tr, td2);
+				append_dev(td2, div);
+				append_dev(div, a0);
+				mount_component(editicon, a0, null);
+				append_dev(a0, t4);
+				append_dev(div, t5);
+				append_dev(div, a1);
+				mount_component(trash2icon, a1, null);
+				append_dev(a1, t6);
+				append_dev(tr, t7);
+				current = true;
+
+				dispose = [
+					listen_dev(a0, "click", click_handler_1, false, false, false),
+					listen_dev(a1, "click", click_handler_2, false, false, false)
+				];
+			},
+			p: function update(new_ctx, dirty) {
+				ctx = new_ctx;
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(editicon.$$.fragment, local);
+				transition_in(trash2icon.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(editicon.$$.fragment, local);
+				transition_out(trash2icon.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(tr);
+				destroy_component(editicon);
+				destroy_component(trash2icon);
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block$2.name,
+			type: "each",
+			source: "(115:12) {#each settings.data as setting}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (101:12)       <div class="spinner-border" role="status">          <span class="sr-only">Loading...</span>      </div>  {:then settings}
+	function create_pending_block(ctx) {
+		let div;
+		let span;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				span = element("span");
+				span.textContent = "Loading...";
+				attr_dev(span, "class", "sr-only");
+				add_location(span, file$b, 102, 8, 2223);
+				attr_dev(div, "class", "spinner-border");
+				attr_dev(div, "role", "status");
+				add_location(div, file$b, 101, 4, 2171);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+				append_dev(div, span);
+			},
+			p: noop,
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_pending_block.name,
+			type: "pending",
+			source: "(101:12)       <div class=\\\"spinner-border\\\" role=\\\"status\\\">          <span class=\\\"sr-only\\\">Loading...</span>      </div>  {:then settings}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (149:16) {#if showAddSuccess}
+	function create_if_block_5(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Successfully added setting";
+				attr_dev(div, "class", "alert alert-success");
+				add_location(div, file$b, 149, 20, 3984);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_5.name,
+			type: "if",
+			source: "(149:16) {#if showAddSuccess}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (155:16) {#if showAddFail}
+	function create_if_block_4(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Error: Unable to add new setting";
+				attr_dev(div, "class", "alert alert-danger");
+				add_location(div, file$b, 155, 20, 4179);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_4.name,
+			type: "if",
+			source: "(155:16) {#if showAddFail}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (180:16) {:else}
+	function create_else_block_1(ctx) {
+		let button;
+		let dispose;
+
+		const block = {
+			c: function create() {
+				button = element("button");
+				button.textContent = "Add Setting";
+				attr_dev(button, "type", "button");
+				attr_dev(button, "class", "btn btn-primary");
+				add_location(button, file$b, 180, 20, 5405);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, button, anchor);
+				dispose = listen_dev(button, "click", /*addSetting*/ ctx[13], false, false, false);
+			},
+			p: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(button);
+				dispose();
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block_1.name,
+			type: "else",
+			source: "(180:16) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (176:16) {#if isAddXHR}
+	function create_if_block_3$1(ctx) {
+		let button;
+		let span;
+		let t;
+
+		const block = {
+			c: function create() {
+				button = element("button");
+				span = element("span");
+				t = text(" Loading...");
+				attr_dev(span, "class", "spinner-border spinner-border-sm");
+				add_location(span, file$b, 177, 24, 5262);
+				attr_dev(button, "class", "btn btn-primary");
+				attr_dev(button, "type", "button");
+				button.disabled = true;
+				add_location(button, file$b, 176, 20, 5181);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, button, anchor);
+				append_dev(button, span);
+				append_dev(button, t);
+			},
+			p: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(button);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_3$1.name,
+			type: "if",
+			source: "(176:16) {#if isAddXHR}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (225:28) {#if showModifySuccess}
+	function create_if_block_2$1(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Successfully modified setting!";
+				attr_dev(div, "class", "alert alert-success");
+				add_location(div, file$b, 225, 32, 7398);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_2$1.name,
+			type: "if",
+			source: "(225:28) {#if showModifySuccess}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (231:28) {#if showModifyFail}
+	function create_if_block_1$2(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "Error: Unable to save setting at this time";
+				attr_dev(div, "class", "alert alert-danger");
+				add_location(div, file$b, 231, 32, 7660);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1$2.name,
+			type: "if",
+			source: "(231:28) {#if showModifyFail}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (252:16) {:else}
+	function create_else_block$3(ctx) {
+		let button;
+		let dispose;
+
+		const block = {
+			c: function create() {
+				button = element("button");
+				button.textContent = "Save Setting";
+				attr_dev(button, "type", "button");
+				attr_dev(button, "class", "btn btn-primary");
+				add_location(button, file$b, 252, 20, 8760);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, button, anchor);
+				dispose = listen_dev(button, "click", /*saveSetting*/ ctx[12], false, false, false);
+			},
+			p: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(button);
+				dispose();
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block$3.name,
+			type: "else",
+			source: "(252:16) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (248:16) {#if isModifyXHR}
+	function create_if_block$3(ctx) {
+		let button;
+		let span;
+		let t;
+
+		const block = {
+			c: function create() {
+				button = element("button");
+				span = element("span");
+				t = text(" Loading...");
+				attr_dev(span, "class", "spinner-border spinner-border-sm");
+				add_location(span, file$b, 249, 24, 8617);
+				attr_dev(button, "class", "btn btn-primary");
+				attr_dev(button, "type", "button");
+				button.disabled = true;
+				add_location(button, file$b, 248, 20, 8536);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, button, anchor);
+				append_dev(button, span);
+				append_dev(button, t);
+			},
+			p: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(button);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block$3.name,
+			type: "if",
+			source: "(248:16) {#if isModifyXHR}",
+			ctx
+		});
+
+		return block;
+	}
+
+	function create_fragment$c(ctx) {
+		let div2;
+		let div0;
+		let h2;
+		let t1;
+		let div1;
+		let button0;
+		let t2;
+		let t3;
+		let promise;
+		let t4;
+		let div10;
+		let div9;
+		let div8;
+		let div3;
+		let h50;
+		let t6;
+		let button1;
+		let span0;
+		let t8;
+		let div6;
+		let t9;
+		let t10;
+		let form0;
+		let div4;
+		let label0;
+		let t12;
+		let input0;
+		let t13;
+		let div5;
+		let label1;
+		let t15;
+		let input1;
+		let t16;
+		let div7;
+		let button2;
+		let t18;
+		let t19;
+		let div16;
+		let div15;
+		let div14;
+		let div11;
+		let h51;
+		let t21;
+		let button3;
+		let span1;
+		let t23;
+		let div12;
+		let t24;
+		let mark;
+		let t25_value = /*tmp*/ ctx[0].key + "";
+		let t25;
+		let t26;
+		let t27;
+		let div13;
+		let button4;
+		let t29;
+		let button5;
+		let t31;
+		let div25;
+		let div24;
+		let div23;
+		let div17;
+		let h52;
+		let t32;
+		let em;
+		let t33_value = /*tmp*/ ctx[0].key + "";
+		let t33;
+		let t34;
+		let t35;
+		let button6;
+		let span2;
+		let t37;
+		let div21;
+		let div20;
+		let div19;
+		let form1;
+		let t38;
+		let t39;
+		let div18;
+		let label2;
+		let t40;
+		let t41_value = /*tmp*/ ctx[0].key + "";
+		let t41;
+		let t42;
+		let t43;
+		let input2;
+		let input2_value_value;
+		let t44;
+		let input3;
+		let input3_value_value;
+		let t45;
+		let div22;
+		let button7;
+		let t47;
+		let current;
+		let dispose;
+		const plussquareicon = new PlusSquareIcon({ $$inline: true });
+
+		let info = {
+			ctx,
+			current: null,
+			token: null,
+			pending: create_pending_block,
+			then: create_then_block,
+			catch: create_catch_block,
+			value: 22,
+			blocks: [,,,]
+		};
+
+		handle_promise(promise = /*xhr*/ ctx[9], info);
+		let if_block0 = /*showAddSuccess*/ ctx[7] && create_if_block_5(ctx);
+		let if_block1 = /*showAddFail*/ ctx[8] && create_if_block_4(ctx);
+
+		function select_block_type(ctx, dirty) {
+			if (/*isAddXHR*/ ctx[6]) return create_if_block_3$1;
+			return create_else_block_1;
+		}
+
+		let current_block_type = select_block_type(ctx);
+		let if_block2 = current_block_type(ctx);
+		let if_block3 = /*showModifySuccess*/ ctx[3] && create_if_block_2$1(ctx);
+		let if_block4 = /*showModifyFail*/ ctx[4] && create_if_block_1$2(ctx);
+
+		function select_block_type_1(ctx, dirty) {
+			if (/*isModifyXHR*/ ctx[1]) return create_if_block$3;
+			return create_else_block$3;
+		}
+
+		let current_block_type_1 = select_block_type_1(ctx);
+		let if_block5 = current_block_type_1(ctx);
+
+		const block = {
+			c: function create() {
+				div2 = element("div");
+				div0 = element("div");
+				h2 = element("h2");
+				h2.textContent = "Settings";
+				t1 = space();
+				div1 = element("div");
+				button0 = element("button");
+				create_component(plussquareicon.$$.fragment);
+				t2 = text(" Add Setting");
+				t3 = space();
+				info.block.c();
+				t4 = space();
+				div10 = element("div");
+				div9 = element("div");
+				div8 = element("div");
+				div3 = element("div");
+				h50 = element("h5");
+				h50.textContent = "Add New Setting";
+				t6 = space();
+				button1 = element("button");
+				span0 = element("span");
+				span0.textContent = "×";
+				t8 = space();
+				div6 = element("div");
+				if (if_block0) if_block0.c();
+				t9 = space();
+				if (if_block1) if_block1.c();
+				t10 = space();
+				form0 = element("form");
+				div4 = element("div");
+				label0 = element("label");
+				label0.textContent = "Key";
+				t12 = space();
+				input0 = element("input");
+				t13 = space();
+				div5 = element("div");
+				label1 = element("label");
+				label1.textContent = "Value";
+				t15 = space();
+				input1 = element("input");
+				t16 = space();
+				div7 = element("div");
+				button2 = element("button");
+				button2.textContent = "Close";
+				t18 = space();
+				if_block2.c();
+				t19 = space();
+				div16 = element("div");
+				div15 = element("div");
+				div14 = element("div");
+				div11 = element("div");
+				h51 = element("h5");
+				h51.textContent = "Hey! Think before you delete.";
+				t21 = space();
+				button3 = element("button");
+				span1 = element("span");
+				span1.textContent = "×";
+				t23 = space();
+				div12 = element("div");
+				t24 = text("Are you sure you want to delete ");
+				mark = element("mark");
+				t25 = text(t25_value);
+				t26 = text(" setting? This will affect the website if this setting is currently being used.");
+				t27 = space();
+				div13 = element("div");
+				button4 = element("button");
+				button4.textContent = "Close";
+				t29 = space();
+				button5 = element("button");
+				button5.textContent = "Understood";
+				t31 = space();
+				div25 = element("div");
+				div24 = element("div");
+				div23 = element("div");
+				div17 = element("div");
+				h52 = element("h5");
+				t32 = text("Modify \"");
+				em = element("em");
+				t33 = text(t33_value);
+				t34 = text("\"");
+				t35 = space();
+				button6 = element("button");
+				span2 = element("span");
+				span2.textContent = "×";
+				t37 = space();
+				div21 = element("div");
+				div20 = element("div");
+				div19 = element("div");
+				form1 = element("form");
+				if (if_block3) if_block3.c();
+				t38 = space();
+				if (if_block4) if_block4.c();
+				t39 = space();
+				div18 = element("div");
+				label2 = element("label");
+				t40 = text("\"");
+				t41 = text(t41_value);
+				t42 = text("\" New Value");
+				t43 = space();
+				input2 = element("input");
+				t44 = space();
+				input3 = element("input");
+				t45 = space();
+				div22 = element("div");
+				button7 = element("button");
+				button7.textContent = "Close";
+				t47 = space();
+				if_block5.c();
+				attr_dev(h2, "class", "display-4");
+				add_location(h2, file$b, 90, 8, 1891);
+				add_location(div0, file$b, 89, 4, 1876);
+				attr_dev(button0, "type", "button");
+				attr_dev(button0, "class", "btn btn-secondary btn-lg");
+				add_location(button0, file$b, 94, 8, 1961);
+				add_location(div1, file$b, 93, 4, 1946);
+				attr_dev(div2, "class", "d-flex justify-content-between align-items-center");
+				add_location(div2, file$b, 88, 0, 1807);
+				attr_dev(h50, "class", "modal-title");
+				add_location(h50, file$b, 142, 16, 3640);
+				attr_dev(span0, "aria-hidden", "true");
+				add_location(span0, file$b, 144, 20, 3800);
+				attr_dev(button1, "type", "button");
+				attr_dev(button1, "class", "close");
+				attr_dev(button1, "data-dismiss", "modal");
+				attr_dev(button1, "aria-label", "Close");
+				add_location(button1, file$b, 143, 16, 3702);
+				attr_dev(div3, "class", "modal-header");
+				add_location(div3, file$b, 141, 12, 3596);
+				attr_dev(label0, "for", "add-key");
+				attr_dev(label0, "class", "sr-only");
+				add_location(label0, file$b, 162, 24, 4482);
+				attr_dev(input0, "type", "text");
+				attr_dev(input0, "class", "form-control");
+				attr_dev(input0, "placeholder", "Key");
+				attr_dev(input0, "id", "add-key");
+				attr_dev(input0, "name", "key");
+				add_location(input0, file$b, 163, 24, 4556);
+				attr_dev(div4, "class", "form-group mb-2 mr-2");
+				add_location(div4, file$b, 161, 20, 4422);
+				attr_dev(label1, "for", "add-value");
+				attr_dev(label1, "class", "sr-only");
+				add_location(label1, file$b, 167, 24, 4745);
+				attr_dev(input1, "type", "text");
+				attr_dev(input1, "class", "form-control");
+				attr_dev(input1, "placeholder", "Value");
+				attr_dev(input1, "id", "add-value");
+				attr_dev(input1, "name", "value");
+				add_location(input1, file$b, 168, 24, 4823);
+				attr_dev(div5, "class", "form-group mb-2");
+				add_location(div5, file$b, 166, 20, 4690);
+				attr_dev(form0, "class", "form-inline");
+				attr_dev(form0, "method", "POST");
+				add_location(form0, file$b, 160, 16, 4340);
+				attr_dev(div6, "class", "modal-body");
+				add_location(div6, file$b, 147, 12, 3900);
+				attr_dev(button2, "type", "button");
+				attr_dev(button2, "class", "btn btn-secondary");
+				attr_dev(button2, "data-dismiss", "modal");
+				add_location(button2, file$b, 173, 16, 5042);
+				attr_dev(div7, "class", "modal-footer");
+				add_location(div7, file$b, 172, 12, 4998);
+				attr_dev(div8, "class", "modal-content");
+				add_location(div8, file$b, 140, 8, 3555);
+				attr_dev(div9, "class", "modal-dialog");
+				add_location(div9, file$b, 139, 4, 3519);
+				attr_dev(div10, "class", "modal fade");
+				attr_dev(div10, "id", "add-modal");
+				attr_dev(div10, "data-backdrop", "static");
+				add_location(div10, file$b, 138, 0, 3451);
+				attr_dev(h51, "class", "modal-title");
+				add_location(h51, file$b, 193, 16, 5818);
+				attr_dev(span1, "aria-hidden", "true");
+				add_location(span1, file$b, 195, 20, 5992);
+				attr_dev(button3, "type", "button");
+				attr_dev(button3, "class", "close");
+				attr_dev(button3, "data-dismiss", "modal");
+				attr_dev(button3, "aria-label", "Close");
+				add_location(button3, file$b, 194, 16, 5894);
+				attr_dev(div11, "class", "modal-header");
+				add_location(div11, file$b, 192, 12, 5774);
+				add_location(mark, file$b, 199, 48, 6166);
+				attr_dev(div12, "class", "modal-body");
+				add_location(div12, file$b, 198, 12, 6092);
+				attr_dev(button4, "type", "button");
+				attr_dev(button4, "class", "btn btn-secondary");
+				attr_dev(button4, "data-dismiss", "modal");
+				add_location(button4, file$b, 202, 16, 6345);
+				attr_dev(button5, "type", "button");
+				attr_dev(button5, "class", "btn btn-primary");
+				add_location(button5, file$b, 203, 16, 6446);
+				attr_dev(div13, "class", "modal-footer");
+				add_location(div13, file$b, 201, 12, 6301);
+				attr_dev(div14, "class", "modal-content");
+				add_location(div14, file$b, 191, 8, 5733);
+				attr_dev(div15, "class", "modal-dialog");
+				add_location(div15, file$b, 190, 4, 5697);
+				attr_dev(div16, "class", "modal fade");
+				attr_dev(div16, "id", "delete-confirm");
+				attr_dev(div16, "data-backdrop", "static");
+				add_location(div16, file$b, 189, 0, 5624);
+				add_location(em, file$b, 215, 48, 6876);
+				attr_dev(h52, "class", "modal-title");
+				add_location(h52, file$b, 215, 16, 6844);
+				attr_dev(span2, "aria-hidden", "true");
+				add_location(span2, file$b, 217, 20, 7016);
+				attr_dev(button6, "type", "button");
+				attr_dev(button6, "class", "close");
+				attr_dev(button6, "data-dismiss", "modal");
+				attr_dev(button6, "aria-label", "Close");
+				add_location(button6, file$b, 216, 16, 6918);
+				attr_dev(div17, "class", "modal-header");
+				add_location(div17, file$b, 214, 12, 6800);
+				attr_dev(label2, "for", "new_value");
+				add_location(label2, file$b, 237, 32, 7937);
+				attr_dev(input2, "type", "text");
+				attr_dev(input2, "name", "new_value");
+				input2.value = input2_value_value = /*tmp*/ ctx[0].value;
+				attr_dev(input2, "class", "form-control");
+				attr_dev(input2, "id", "new_value");
+				add_location(input2, file$b, 238, 32, 8023);
+				attr_dev(div18, "class", "form-group");
+				add_location(div18, file$b, 236, 28, 7879);
+				attr_dev(input3, "type", "hidden");
+				attr_dev(input3, "name", "id");
+				input3.value = input3_value_value = /*tmp*/ ctx[0].id;
+				add_location(input3, file$b, 240, 28, 8183);
+				attr_dev(form1, "method", "POST");
+				add_location(form1, file$b, 223, 24, 7268);
+				attr_dev(div19, "class", "w-100");
+				add_location(div19, file$b, 222, 20, 7223);
+				attr_dev(div20, "class", "d-flex justify-content-center");
+				add_location(div20, file$b, 221, 16, 7158);
+				attr_dev(div21, "class", "modal-body");
+				add_location(div21, file$b, 220, 12, 7116);
+				attr_dev(button7, "type", "button");
+				attr_dev(button7, "class", "btn btn-secondary");
+				attr_dev(button7, "data-dismiss", "modal");
+				add_location(button7, file$b, 246, 16, 8396);
+				attr_dev(div22, "class", "modal-footer");
+				add_location(div22, file$b, 245, 12, 8352);
+				attr_dev(div23, "class", "modal-content");
+				add_location(div23, file$b, 213, 8, 6759);
+				attr_dev(div24, "class", "modal-dialog");
+				add_location(div24, file$b, 212, 4, 6723);
+				attr_dev(div25, "class", "modal fade");
+				attr_dev(div25, "id", "modify-modal");
+				attr_dev(div25, "data-backdrop", "static");
+				add_location(div25, file$b, 211, 0, 6652);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div2, anchor);
+				append_dev(div2, div0);
+				append_dev(div0, h2);
+				append_dev(div2, t1);
+				append_dev(div2, div1);
+				append_dev(div1, button0);
+				mount_component(plussquareicon, button0, null);
+				append_dev(button0, t2);
+				insert_dev(target, t3, anchor);
+				info.block.m(target, info.anchor = anchor);
+				info.mount = () => t4.parentNode;
+				info.anchor = t4;
+				insert_dev(target, t4, anchor);
+				insert_dev(target, div10, anchor);
+				append_dev(div10, div9);
+				append_dev(div9, div8);
+				append_dev(div8, div3);
+				append_dev(div3, h50);
+				append_dev(div3, t6);
+				append_dev(div3, button1);
+				append_dev(button1, span0);
+				append_dev(div8, t8);
+				append_dev(div8, div6);
+				if (if_block0) if_block0.m(div6, null);
+				append_dev(div6, t9);
+				if (if_block1) if_block1.m(div6, null);
+				append_dev(div6, t10);
+				append_dev(div6, form0);
+				append_dev(form0, div4);
+				append_dev(div4, label0);
+				append_dev(div4, t12);
+				append_dev(div4, input0);
+				append_dev(form0, t13);
+				append_dev(form0, div5);
+				append_dev(div5, label1);
+				append_dev(div5, t15);
+				append_dev(div5, input1);
+				/*form0_binding*/ ctx[19](form0);
+				append_dev(div8, t16);
+				append_dev(div8, div7);
+				append_dev(div7, button2);
+				append_dev(div7, t18);
+				if_block2.m(div7, null);
+				insert_dev(target, t19, anchor);
+				insert_dev(target, div16, anchor);
+				append_dev(div16, div15);
+				append_dev(div15, div14);
+				append_dev(div14, div11);
+				append_dev(div11, h51);
+				append_dev(div11, t21);
+				append_dev(div11, button3);
+				append_dev(button3, span1);
+				append_dev(div14, t23);
+				append_dev(div14, div12);
+				append_dev(div12, t24);
+				append_dev(div12, mark);
+				append_dev(mark, t25);
+				append_dev(div12, t26);
+				append_dev(div14, t27);
+				append_dev(div14, div13);
+				append_dev(div13, button4);
+				append_dev(div13, t29);
+				append_dev(div13, button5);
+				insert_dev(target, t31, anchor);
+				insert_dev(target, div25, anchor);
+				append_dev(div25, div24);
+				append_dev(div24, div23);
+				append_dev(div23, div17);
+				append_dev(div17, h52);
+				append_dev(h52, t32);
+				append_dev(h52, em);
+				append_dev(em, t33);
+				append_dev(h52, t34);
+				append_dev(div17, t35);
+				append_dev(div17, button6);
+				append_dev(button6, span2);
+				append_dev(div23, t37);
+				append_dev(div23, div21);
+				append_dev(div21, div20);
+				append_dev(div20, div19);
+				append_dev(div19, form1);
+				if (if_block3) if_block3.m(form1, null);
+				append_dev(form1, t38);
+				if (if_block4) if_block4.m(form1, null);
+				append_dev(form1, t39);
+				append_dev(form1, div18);
+				append_dev(div18, label2);
+				append_dev(label2, t40);
+				append_dev(label2, t41);
+				append_dev(label2, t42);
+				append_dev(div18, t43);
+				append_dev(div18, input2);
+				append_dev(form1, t44);
+				append_dev(form1, input3);
+				/*form1_binding*/ ctx[21](form1);
+				append_dev(div23, t45);
+				append_dev(div23, div22);
+				append_dev(div22, button7);
+				append_dev(div22, t47);
+				if_block5.m(div22, null);
+				current = true;
+
+				dispose = [
+					listen_dev(button0, "click", /*click_handler*/ ctx[16], false, false, false),
+					listen_dev(button5, "click", /*click_handler_3*/ ctx[20], false, false, false)
+				];
+			},
+			p: function update(new_ctx, [dirty]) {
+				ctx = new_ctx;
+
+				{
+					const child_ctx = ctx.slice();
+					child_ctx[22] = info.resolved;
+					info.block.p(child_ctx, dirty);
+				}
+
+				if (/*showAddSuccess*/ ctx[7]) {
+					if (!if_block0) {
+						if_block0 = create_if_block_5(ctx);
+						if_block0.c();
+						if_block0.m(div6, t9);
+					}
+				} else if (if_block0) {
+					if_block0.d(1);
+					if_block0 = null;
+				}
+
+				if (/*showAddFail*/ ctx[8]) {
+					if (!if_block1) {
+						if_block1 = create_if_block_4(ctx);
+						if_block1.c();
+						if_block1.m(div6, t10);
+					}
+				} else if (if_block1) {
+					if_block1.d(1);
+					if_block1 = null;
+				}
+
+				if (current_block_type === (current_block_type = select_block_type(ctx)) && if_block2) {
+					if_block2.p(ctx, dirty);
+				} else {
+					if_block2.d(1);
+					if_block2 = current_block_type(ctx);
+
+					if (if_block2) {
+						if_block2.c();
+						if_block2.m(div7, null);
+					}
+				}
+
+				if ((!current || dirty & /*tmp*/ 1) && t25_value !== (t25_value = /*tmp*/ ctx[0].key + "")) set_data_dev(t25, t25_value);
+				if ((!current || dirty & /*tmp*/ 1) && t33_value !== (t33_value = /*tmp*/ ctx[0].key + "")) set_data_dev(t33, t33_value);
+
+				if (/*showModifySuccess*/ ctx[3]) {
+					if (!if_block3) {
+						if_block3 = create_if_block_2$1(ctx);
+						if_block3.c();
+						if_block3.m(form1, t38);
+					}
+				} else if (if_block3) {
+					if_block3.d(1);
+					if_block3 = null;
+				}
+
+				if (/*showModifyFail*/ ctx[4]) {
+					if (!if_block4) {
+						if_block4 = create_if_block_1$2(ctx);
+						if_block4.c();
+						if_block4.m(form1, t39);
+					}
+				} else if (if_block4) {
+					if_block4.d(1);
+					if_block4 = null;
+				}
+
+				if ((!current || dirty & /*tmp*/ 1) && t41_value !== (t41_value = /*tmp*/ ctx[0].key + "")) set_data_dev(t41, t41_value);
+
+				if (!current || dirty & /*tmp*/ 1 && input2_value_value !== (input2_value_value = /*tmp*/ ctx[0].value) && input2.value !== input2_value_value) {
+					prop_dev(input2, "value", input2_value_value);
+				}
+
+				if (!current || dirty & /*tmp*/ 1 && input3_value_value !== (input3_value_value = /*tmp*/ ctx[0].id)) {
+					prop_dev(input3, "value", input3_value_value);
+				}
+
+				if (current_block_type_1 === (current_block_type_1 = select_block_type_1(ctx)) && if_block5) {
+					if_block5.p(ctx, dirty);
+				} else {
+					if_block5.d(1);
+					if_block5 = current_block_type_1(ctx);
+
+					if (if_block5) {
+						if_block5.c();
+						if_block5.m(div22, null);
+					}
+				}
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(plussquareicon.$$.fragment, local);
+				transition_in(info.block);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(plussquareicon.$$.fragment, local);
+
+				for (let i = 0; i < 3; i += 1) {
+					const block = info.blocks[i];
+					transition_out(block);
+				}
+
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(div2);
+				destroy_component(plussquareicon);
+				if (detaching) detach_dev(t3);
+				info.block.d(detaching);
+				info.token = null;
+				info = null;
+				if (detaching) detach_dev(t4);
+				if (detaching) detach_dev(div10);
+				if (if_block0) if_block0.d();
+				if (if_block1) if_block1.d();
+				/*form0_binding*/ ctx[19](null);
+				if_block2.d();
+				if (detaching) detach_dev(t19);
+				if (detaching) detach_dev(div16);
+				if (detaching) detach_dev(t31);
+				if (detaching) detach_dev(div25);
+				if (if_block3) if_block3.d();
+				if (if_block4) if_block4.d();
+				/*form1_binding*/ ctx[21](null);
+				if_block5.d();
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$c.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	async function deleteSetting(id) {
+		try {
+			const deleteXHR = await axios$1.post("./settings/delete", { id });
+
+			setTimeout(
+				() => {
+					top.location.reload();
+				},
+				1000
+			);
+		} catch(e) {
+			alert("Error: Unable to delete setting");
+		}
+	}
+
+	function instance$c($$self, $$props, $$invalidate) {
+		const xhr = axios$1.get("./settings/register");
+		let tmp = {};
+
+		function showDeleteModal(setting) {
+			$$invalidate(0, tmp = setting);
+			jquery("#delete-confirm").modal("show");
+		}
+
+		let isModifyXHR = false,
+			modifyForm,
+			modifyXHR,
+			showModifySuccess = false,
+			showModifyFail = false;
+
+		function showModifyModal(setting) {
+			$$invalidate(0, tmp = setting);
+			jquery("#modify-modal").modal("show");
+		}
+
+		async function saveSetting() {
+			$$invalidate(1, isModifyXHR = true);
+			const data = new FormData(modifyForm);
+
+			try {
+				modifyXHR = await axios$1.post("./settings/modify", data);
+				$$invalidate(4, showModifyFail = false);
+				$$invalidate(3, showModifySuccess = true);
+
+				setTimeout(
+					() => {
+						top.location.reload();
+					},
+					1000
+				);
+			} catch(e) {
+				$$invalidate(4, showModifyFail = true);
+			}
+
+			$$invalidate(1, isModifyXHR = false);
+		}
+
+		let addForm, addXHR, isAddXHR = false, showAddSuccess = false, showAddFail = false;
+
+		async function addSetting() {
+			$$invalidate(6, isAddXHR = true);
+			const data = new FormData(addForm);
+
+			try {
+				addXHR = await axios$1.post("./settings/add", data);
+				$$invalidate(8, showAddFail = false);
+				$$invalidate(7, showAddSuccess = true);
+
+				setTimeout(
+					() => {
+						top.location.reload();
+					},
+					1000
+				);
+			} catch(e) {
+				$$invalidate(8, showAddFail = true);
+			}
+
+			$$invalidate(6, isAddXHR = false);
+		}
+
+		const writable_props = [];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Settings> was created with unknown prop '${key}'`);
+		});
+
+		let { $$slots = {}, $$scope } = $$props;
+		validate_slots("Settings", $$slots, []);
+
+		const click_handler = () => {
+			jquery("#add-modal").modal("show");
+		};
+
+		const click_handler_1 = setting => {
+			showModifyModal(setting);
+		};
+
+		const click_handler_2 = setting => {
+			showDeleteModal(setting);
+		};
+
+		function form0_binding($$value) {
+			binding_callbacks[$$value ? "unshift" : "push"](() => {
+				$$invalidate(5, addForm = $$value);
+			});
+		}
+
+		const click_handler_3 = () => {
+			deleteSetting(tmp.id);
+		};
+
+		function form1_binding($$value) {
+			binding_callbacks[$$value ? "unshift" : "push"](() => {
+				$$invalidate(2, modifyForm = $$value);
+			});
+		}
+
+		$$self.$capture_state = () => ({
+			jq: jquery,
+			axios: axios$1,
+			onMount,
+			Trash2Icon,
+			EditIcon,
+			PlusSquareIcon,
+			xhr,
+			tmp,
+			showDeleteModal,
+			deleteSetting,
+			isModifyXHR,
+			modifyForm,
+			modifyXHR,
+			showModifySuccess,
+			showModifyFail,
+			showModifyModal,
+			saveSetting,
+			addForm,
+			addXHR,
+			isAddXHR,
+			showAddSuccess,
+			showAddFail,
+			addSetting
+		});
+
+		$$self.$inject_state = $$props => {
+			if ("tmp" in $$props) $$invalidate(0, tmp = $$props.tmp);
+			if ("isModifyXHR" in $$props) $$invalidate(1, isModifyXHR = $$props.isModifyXHR);
+			if ("modifyForm" in $$props) $$invalidate(2, modifyForm = $$props.modifyForm);
+			if ("modifyXHR" in $$props) modifyXHR = $$props.modifyXHR;
+			if ("showModifySuccess" in $$props) $$invalidate(3, showModifySuccess = $$props.showModifySuccess);
+			if ("showModifyFail" in $$props) $$invalidate(4, showModifyFail = $$props.showModifyFail);
+			if ("addForm" in $$props) $$invalidate(5, addForm = $$props.addForm);
+			if ("addXHR" in $$props) addXHR = $$props.addXHR;
+			if ("isAddXHR" in $$props) $$invalidate(6, isAddXHR = $$props.isAddXHR);
+			if ("showAddSuccess" in $$props) $$invalidate(7, showAddSuccess = $$props.showAddSuccess);
+			if ("showAddFail" in $$props) $$invalidate(8, showAddFail = $$props.showAddFail);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [
+			tmp,
+			isModifyXHR,
+			modifyForm,
+			showModifySuccess,
+			showModifyFail,
+			addForm,
+			isAddXHR,
+			showAddSuccess,
+			showAddFail,
+			xhr,
+			showDeleteModal,
+			showModifyModal,
+			saveSetting,
+			addSetting,
+			modifyXHR,
+			addXHR,
+			click_handler,
+			click_handler_1,
+			click_handler_2,
+			form0_binding,
+			click_handler_3,
+			form1_binding
+		];
+	}
+
+	class Settings extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$c, create_fragment$c, safe_not_equal, {});
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "Settings",
+				options,
+				id: create_fragment$c.name
+			});
+		}
+	}
+
+	const routes = {
+	    '/': Home,
+	    '/teachers': Teachers,
+	    '/students': Students,
+	    '/settings': Settings
+	};
+
+	/* src\App.svelte generated by Svelte v3.19.2 */
+	const file$c = "src\\App.svelte";
+
+	function create_fragment$d(ctx) {
 		let div4;
 		let div3;
 		let div1;
@@ -18039,18 +27499,26 @@ var app = (function () {
 		let t1;
 		let div0;
 		let a0;
+		let active_action;
 		let t3;
 		let a1;
+		let active_action_1;
 		let t5;
 		let a2;
+		let active_action_2;
 		let t7;
 		let a3;
+		let active_action_3;
 		let t9;
-		let div2;
+		let a4;
 		let t11;
+		let div2;
+		let t12;
 		let form;
 		let input;
+		let current;
 		let dispose;
+		const router = new Router({ props: { routes }, $$inline: true });
 
 		const block = {
 			c: function create() {
@@ -18071,44 +27539,50 @@ var app = (function () {
 				a2.textContent = "Students";
 				t7 = space();
 				a3 = element("a");
-				a3.textContent = "Logout";
+				a3.textContent = "Settings";
 				t9 = space();
-				div2 = element("div");
-				div2.textContent = "2";
+				a4 = element("a");
+				a4.textContent = "Logout";
 				t11 = space();
+				div2 = element("div");
+				create_component(router.$$.fragment);
+				t12 = space();
 				form = element("form");
 				input = element("input");
 				attr_dev(h1, "class", "text-center");
-				add_location(h1, file, 12, 3, 140);
-				attr_dev(a0, "href", "#/home");
-				attr_dev(a0, "class", "nav-link active");
-				add_location(a0, file, 14, 4, 230);
+				add_location(h1, file$c, 17, 3, 301);
+				attr_dev(a0, "href", "#/");
+				attr_dev(a0, "class", "nav-link");
+				add_location(a0, file$c, 19, 4, 403);
 				attr_dev(a1, "href", "#/teachers");
 				attr_dev(a1, "class", "nav-link");
-				add_location(a1, file, 15, 4, 288);
+				add_location(a1, file$c, 20, 4, 461);
 				attr_dev(a2, "href", "#/students");
 				attr_dev(a2, "class", "nav-link");
-				add_location(a2, file, 16, 4, 343);
-				attr_dev(a3, "href", "javascript:;");
+				add_location(a2, file$c, 21, 4, 527);
+				attr_dev(a3, "href", "#/settings");
 				attr_dev(a3, "class", "nav-link");
-				add_location(a3, file, 17, 4, 398);
-				attr_dev(div0, "class", "nav flex-column nav-pills mt-3");
-				add_location(div0, file, 13, 3, 181);
-				attr_dev(div1, "class", "col-3");
-				add_location(div1, file, 11, 2, 117);
-				attr_dev(div2, "class", "col-9");
-				add_location(div2, file, 21, 2, 491);
+				add_location(a3, file$c, 22, 4, 593);
+				attr_dev(a4, "href", "javascript:;");
+				attr_dev(a4, "class", "nav-link");
+				add_location(a4, file$c, 23, 4, 659);
+				attr_dev(div0, "class", "nav flex-column nav-pills mt-3 sidenav-bar svelte-15c4ia1");
+				add_location(div0, file$c, 18, 3, 342);
+				attr_dev(div1, "class", "col-2");
+				add_location(div1, file$c, 16, 2, 278);
+				attr_dev(div2, "class", "col-10");
+				add_location(div2, file$c, 27, 2, 752);
 				attr_dev(div3, "class", "row mt-3");
-				add_location(div3, file, 10, 1, 92);
-				attr_dev(div4, "class", "container");
-				add_location(div4, file, 9, 0, 67);
+				add_location(div3, file$c, 15, 1, 253);
+				attr_dev(div4, "class", "container-fluid");
+				add_location(div4, file$c, 14, 0, 222);
 				attr_dev(input, "type", "hidden");
 				attr_dev(input, "name", "_token");
 				input.value = /*csrf_token*/ ctx[0];
-				add_location(input, file, 28, 1, 581);
+				add_location(input, file$c, 34, 1, 884);
 				attr_dev(form, "method", "POST");
 				attr_dev(form, "action", "./logout");
-				add_location(form, file, 27, 0, 541);
+				add_location(form, file$c, 33, 0, 821);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -18127,31 +27601,52 @@ var app = (function () {
 				append_dev(div0, a2);
 				append_dev(div0, t7);
 				append_dev(div0, a3);
-				append_dev(div3, t9);
+				append_dev(div0, t9);
+				append_dev(div0, a4);
+				append_dev(div3, t11);
 				append_dev(div3, div2);
-				insert_dev(target, t11, anchor);
+				mount_component(router, div2, null);
+				insert_dev(target, t12, anchor);
 				insert_dev(target, form, anchor);
 				append_dev(form, input);
-				dispose = listen_dev(a3, "click", logout, false, false, false);
+				/*form_binding*/ ctx[3](form);
+				current = true;
+
+				dispose = [
+					action_destroyer(active_action = active.call(null, a0)),
+					action_destroyer(active_action_1 = active.call(null, a1)),
+					action_destroyer(active_action_2 = active.call(null, a2)),
+					action_destroyer(active_action_3 = active.call(null, a3)),
+					listen_dev(a4, "click", /*logout*/ ctx[2], false, false, false)
+				];
 			},
 			p: function update(ctx, [dirty]) {
-				if (dirty & /*csrf_token*/ 1) {
+				if (!current || dirty & /*csrf_token*/ 1) {
 					prop_dev(input, "value", /*csrf_token*/ ctx[0]);
 				}
 			},
-			i: noop,
-			o: noop,
+			i: function intro(local) {
+				if (current) return;
+				transition_in(router.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(router.$$.fragment, local);
+				current = false;
+			},
 			d: function destroy(detaching) {
 				if (detaching) detach_dev(div4);
-				if (detaching) detach_dev(t11);
+				destroy_component(router);
+				if (detaching) detach_dev(t12);
 				if (detaching) detach_dev(form);
-				dispose();
+				/*form_binding*/ ctx[3](null);
+				run_all(dispose);
 			}
 		};
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment.name,
+			id: create_fragment$d.name,
 			type: "component",
 			source: "",
 			ctx
@@ -18160,12 +27655,14 @@ var app = (function () {
 		return block;
 	}
 
-	function logout() {
-		
-	}
-
-	function instance($$self, $$props, $$invalidate) {
+	function instance$d($$self, $$props, $$invalidate) {
 		let { csrf_token } = $$props;
+		let logoutForm;
+
+		function logout() {
+			logoutForm.submit();
+		}
+
 		const writable_props = ["csrf_token"];
 
 		Object.keys($$props).forEach(key => {
@@ -18175,33 +27672,47 @@ var app = (function () {
 		let { $$slots = {}, $$scope } = $$props;
 		validate_slots("App", $$slots, []);
 
+		function form_binding($$value) {
+			binding_callbacks[$$value ? "unshift" : "push"](() => {
+				$$invalidate(1, logoutForm = $$value);
+			});
+		}
+
 		$$self.$set = $$props => {
 			if ("csrf_token" in $$props) $$invalidate(0, csrf_token = $$props.csrf_token);
 		};
 
-		$$self.$capture_state = () => ({ csrf_token, logout });
+		$$self.$capture_state = () => ({
+			csrf_token,
+			Router,
+			active,
+			routes,
+			logoutForm,
+			logout
+		});
 
 		$$self.$inject_state = $$props => {
 			if ("csrf_token" in $$props) $$invalidate(0, csrf_token = $$props.csrf_token);
+			if ("logoutForm" in $$props) $$invalidate(1, logoutForm = $$props.logoutForm);
 		};
 
 		if ($$props && "$$inject" in $$props) {
 			$$self.$inject_state($$props.$$inject);
 		}
 
-		return [csrf_token];
+		return [csrf_token, logoutForm, logout, form_binding];
 	}
 
 	class App extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance, create_fragment, safe_not_equal, { csrf_token: 0 });
+			init(this, options, instance$d, create_fragment$d, safe_not_equal, { csrf_token: 0 });
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "App",
 				options,
-				id: create_fragment.name
+				id: create_fragment$d.name
 			});
 
 			const { ctx } = this.$$;
