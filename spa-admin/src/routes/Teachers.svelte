@@ -146,7 +146,7 @@ async function removeTeacher(id)
                     <td>{teacher.id}</td>
                     <td>
                         <UserIcon />
-                        <a href="./teacher/?id={teacher.id}">
+                        <a href="#/teacher/?id={teacher.id}">
                             {teacher.full_name}
                         </a>
                     </td>
