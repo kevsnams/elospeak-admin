@@ -19,6 +19,7 @@ function logout()
 			<h1 class="text-center">ELOSpeak</h1>
 			<div class="nav flex-column nav-pills mt-3 sidenav-bar">
 				<a href="/" use:link use:active class="nav-link">Overview</a>
+				<a href="/messages" use:link use:active class="nav-link">Messages</a>
 				<a href="/teachers" use:link use:active class="nav-link">Teachers</a>
 				<a href="/students" use:link use:active={'/(student|students|enroll)(|/.+)'} class="nav-link">Students</a>
 				<a href="/settings" use:link use:active={'/settings(|/.+)'} class="nav-link">Settings</a>

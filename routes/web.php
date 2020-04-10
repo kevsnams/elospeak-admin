@@ -19,6 +19,7 @@ Route::resource('students', 'StudentsController');
 Route::resource('classrooms', 'ClassroomsController');
 Route::resource('countries', 'CountriesController');
 Route::resource('enrollments', 'EnrollmentController');
+Route::resource('customer-messages', 'CustomerMessagesController');
 
 Route::name('settings.')->group(function () {
     Route::get('/settings', 'WebsiteSettingsController@index')->name('index');

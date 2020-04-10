@@ -4,6 +4,7 @@ import StudentsComponent from './routes/Students.svelte';
 import SettingsComponent from './routes/Settings.svelte';
 import StudentComponent from './routes/Student.svelte';
 import EnrollComponent from './routes/Enroll.svelte';
+import MessagesComponent from './routes/Messages.svelte';
 
 const routes = {
     '/': HomeComponent,
@@ -14,7 +15,9 @@ const routes = {
 
     '/student/:id': StudentComponent,
     '/student/:id/:page?': StudentComponent,
-    '/enroll/:id': EnrollComponent
+    '/enroll/:id': EnrollComponent,
+
+    '/messages': MessagesComponent
 };
 
 export default routes;

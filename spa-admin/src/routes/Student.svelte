@@ -3,6 +3,7 @@ export let params = {};
 
 import _ from 'lodash';
 import axios from 'axios';
+import jq from 'jquery';
 
 import {
     SettingsIcon,
@@ -50,8 +51,60 @@ function changePage(name)
 {
     page = _.find(pages, {name});
 }
+
+function showDeleteConfirm()
+{
+    jq('#delete-confirm').modal('show');
+}
+
+let isDeleting = false;
+async function deleteStudent()
+{
+    isDeleting = true;
+
+    try {
+        await axios.post(`./students/${student.id}`, {
+            _method: 'DELETE'
+        });
+        jq('#delete-confirm').modal('hide');
+        
+        setTimeout(() => {
+            top.location.href = '#/students';
+        }, 500);
+    } catch (e) {
+        alert('Error deleting student!');
+    } finally {
+        isDeleting = false;
+    }
+}
 </script>
 
+<div id="delete-confirm" class="modal fade" data-backdrop="static">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Deleting student: Think before you proceed!</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Are you { _.repeat('really ', 5) } sure you want to delete this student?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal" disabled={isDeleting}>Cancel</button>
+                {#if isDeleting}
+                    <button class="btn btn-danger" type="button" disabled>
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        Loading...
+                    </button>
+                {:else}
+                    <button type="button" class="btn btn-danger" on:click|preventDefault={deleteStudent}>Delete Student</button>
+                {/if}
+            </div>
+        </div>
+    </div>
+</div>
 {#await init}
     <div class="ml-auto mr-auto text-center mt-5">
         <div class="spinner-border" role="status">
@@ -70,7 +123,7 @@ function changePage(name)
                 <div class="dropdown-menu">
                     <a class="dropdown-item" href="#/student/{student.id}/edit" on:click={() => changePage('edit')}>Edit Info</a>
                     <div class="dropdown-divider"></div>
-                    <a class="dropdown-item text-danger text-muted" href="javascript:;">
+                    <a class="dropdown-item text-danger text-muted" href="javascript:;" on:click|preventDefault={showDeleteConfirm}>
                         <AlertTriangleIcon /> Delete Account
                     </a>
                 </div>

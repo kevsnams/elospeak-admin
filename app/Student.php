@@ -3,11 +3,16 @@
 namespace App;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
 use Carbon\Carbon;
+
 use App\Enrollment;
 
 class Student extends Model
 {
+    use SoftDeletes;
+    
     public $hidden = ['password'];
     public $appends = ['age', 'birthday_human', 'user_type', 'has_active_enrollment'];
 
