@@ -11,13 +11,15 @@ class ClassroomsTableSeeder extends Seeder
      */
     public function run()
     {
-        for ($i = 0; $i < 20; $i++) {
+        for ($i = 1; $i <= 31; $i++) {
             DB::table('classrooms')->insert([
                 'teacher_id' => 1,
                 'student_id' => 1,
-                'start' => '2019-07-30 07:00:00',
-                'end' => '2019-07-30 07:30:00',
-                'status' => 1
+                'start' => '2020-03-'. $i .' 07:00:00',
+                'end' => '2020-03-'. $i .' 07:30:00',
+                'status' => 1,
+                'price' => 300,
+                'invoice_id' => 1
             ]);
         }
     }

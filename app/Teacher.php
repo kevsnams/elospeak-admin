@@ -9,9 +9,8 @@ class Teacher extends Model
     const EDUC_UNDERGRADUATE = 0;
     const EDUC_COLLEGE_GRADUATE = 1;
 
-    public $hidden = [
-        'password'
-    ];
+    public $hidden = ['password'];
+    public $appends = ['age', 'birthday_human', 'user_type'];
 
     public function classrooms()
     {
@@ -31,8 +30,18 @@ class Teacher extends Model
         return mb_convert_case($value, MB_CASE_TITLE);
     }
 
+    public function getUserTypeAttribute()
+    {
+        return 'teacher';
+    }
+
+    public function getBirthdayHumanAttribute()
+    {
+        return $this->birthday ? date('j F Y', strtotime($this->birthday)) : null;
+    }
+
     public function getAgeAttribute() {
-        return idate('Y') - idate('Y', strtotime($this->birthday));
+        return $this->birthday ? idate('Y') - idate('Y', strtotime($this->birthday)) : null;
     }
 
     public function getEducationalAttainmentValueAttribute()

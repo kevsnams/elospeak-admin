@@ -47,19 +47,29 @@ class StudentsController extends Controller
     public function store(StoreStudentRequest $request)
     {
         $input = $request->validated();
-
         $student = new Student();
-        $student->username = $input['username'];
-        $student->password = Hash::make($input['password']);
-        $student->full_name = $input['full_name'];
-        $student->email = $input['email'];
-        $student->skype = $input['skype'];
+
+        foreach ($request->validated()['data'] as $col => $value) {
+            if ($col == 'password_repeat') {
+                continue;
+            }
+
+            $finalValue = $value;
+            
+            if ($col == 'password') {
+                $finalValue = Hash::make($value);
+            }
+
+            if ($col == 'birthday') {
+                $finalValue = date('Y-m-d', strtotime($value));
+            }
+
+            $student->{$col} = $finalValue;
+        }
+
         $student->save();
 
-        return response()->json([
-            'success' => true,
-            'id' => $student->id
-        ]);
+        return response()->json([$student->id]);
     }
 
     /**
@@ -70,11 +80,9 @@ class StudentsController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $student = Student::with('classrooms', 'classroomSchedulePreference', 'transactions', 'transactions.invoice')->findOrFail($id);
+        $student = Student::with($request->input('with', []))->findOrFail($id);
 
-        return view('students.show', [
-            'student' => $student
-        ]);
+        return response()->json($student->toArray());
     }
 
     /**
@@ -97,30 +105,33 @@ class StudentsController extends Controller
      */
     public function update(StoreStudentRequest $request, $id)
     {
-        $input = $request->validated();
+        $request->validated();
 
         $student = Student::findOrFail($id);
 
-        DB::transaction(function () use ($input, $student, $id) {
-            $student->username = $input['username'];
-
-            if (isset($input['password']) && !empty($input['password'])) {
-                $student->password = Hash::make($input['password']);
+        foreach ($request->validated()['data'] as $col => $value) {
+            if ($col == 'new_password_repeat') {
+                continue;
             }
 
-            $student->full_name = $input['full_name'];
-            $student->email = $input['email'];
-            $student->personal_contact_number = $input['personal_contact_number'];
-            $student->skype = $input['skype'];
-            $student->birthday = date('Y-m-d', strtotime($input['birthday']));
+            $finalValue = $value;
+            $finalCol = $col;
 
-            $student->save();
-        });
+            if ($col == 'new_password') {
+                $finalValue = Hash::make($value);
+                $finalCol = 'password';
+            }
 
-        return response()->json([
-            'success' => true,
-            'id' => $student->id
-        ]);
+            if ($col == 'birthday') {
+                $finalValue = date('Y-m-d', strtotime($value));
+            }
+
+            $student->{$finalCol} = $finalValue;
+        }
+
+        $student->save();
+
+        return response()->json([1]);
     }
 
     /**

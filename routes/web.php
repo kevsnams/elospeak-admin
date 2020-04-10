@@ -12,17 +12,13 @@
 */
 
 Auth::routes();
-Route::get('/app', 'HomeController@app')->name('app');
 Route::get('/', 'HomeController@index')->name('home');
 
 Route::resource('teachers', 'TeachersController');
 Route::resource('students', 'StudentsController');
 Route::resource('classrooms', 'ClassroomsController');
-
-Route::name('classroom.')->group(function () {
-    Route::post('/classroom/timeslots', 'ClassroomsController@timeslots')->name('timeslots');
-    Route::post('/classroom/teachers', 'ClassroomsController@teachers')->name('teachers');
-});
+Route::resource('countries', 'CountriesController');
+Route::resource('enrollments', 'EnrollmentController');
 
 Route::name('settings.')->group(function () {
     Route::get('/settings', 'WebsiteSettingsController@index')->name('index');
@@ -34,21 +30,14 @@ Route::name('settings.')->group(function () {
     Route::post('/settings/add', 'WebsiteSettingsController@add')->name('add');
 });
 
-Route::name('student.')->group(function () {
-    Route::get('/student/classrooms/{id}/{view?}/{date?}', 'StudentsController@classrooms')->name('classrooms');
-    Route::get('/student/classrooms/add/{id}/', 'StudentsController@addClassroom')->name('add-classroom');
-});
-
 Route::name('teacher.')->group(function () {
     Route::get('/teacher/educational-attainment', 'TeachersController@getEducationalAttainment')->name('educational-attainment');
 });
 
-Route::name('enroll.')->group(function() {
-    Route::get('/enroll', 'EnrollController@index')->name('index');
-    Route::post('/enroll', 'EnrollController@store')->name('store');
-    Route::post('/enroll/check-availability', 'EnrollController@checkAvailability')->name('check-availability');
+Route::name('classroom.')->group(function () {
+    Route::get('/classroom/status', 'ClassroomsController@getStatusAction')->name('status');
 });
 
-Route::name('invoice.')->group(function() {
-    Route::get('/invoice/download', 'InvoiceController@download')->name('download');
+Route::name('enrollment.')->group(function () {
+    Route::get('/enrollment/pdf/{id}', 'EnrollmentController@pdf')->name('pdf');
 });

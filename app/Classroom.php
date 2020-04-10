@@ -8,24 +8,19 @@ use Carbon\Carbon;
 
 class Classroom extends Model
 {
-    CONST STATUS_UNPAID = 0;
     const STATUS_ACTIVE = 1;
     const STATUS_DONE = 2;
     const STATUS_CANCELLED = 3;
 
-    const PAYMENT_NUM_WEEKS_CYCLE = 4;
-    const PAYMENT_NUM_DAYS_CYCLE = 30;
-
     public $appends = ['start_raw', 'end_raw'];
 
-    public static function statusArray()
+    public static function status()
     {
-        return [
-            self::STATUS_UNPAID => 'Unpaid',
-            self::STATUS_ACTIVE => 'Active',
-            self::STATUS_DONE => 'Done',
-            self::STATUS_CANCELLED => 'Cancelled'
-        ];
+        return collect([
+            [self::STATUS_ACTIVE, 'Active'],
+            [self::STATUS_DONE, 'Done'],
+            [self::STATUS_CANCELLED, 'Cancelled']
+        ]);
     }
 
     public function student()
@@ -36,6 +31,11 @@ class Classroom extends Model
     public function teacher()
     {
         return $this->belongsTo('App\Teacher');
+    }
+
+    public function enrollment()
+    {
+        return $this->belongsTo('App\Enrollment', 'enrollment_id');
     }
     
     public function getStartAttribute($value)
@@ -50,9 +50,9 @@ class Classroom extends Model
 
     public function getStatusTextAttribute()
     {
-        $status = self::statusArray();
+        $status = self::status()->toArray();
 
-        return $status[$this->status];
+        return $status[$this->status][1];
     }
 
     public function getStartRawAttribute()

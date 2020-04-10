@@ -8,7 +8,8 @@
     <title>{{ config('app.name') }}</title>
 
     <link href="https://fonts.googleapis.com/css?family=Nunito:200,400,700i,900i&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+    <link rel="stylesheet" type="text/css" href="{{ asset('/css/bootstrap.min.css') }}">
+    <link rel="stylesheet" type="text/css" href="{{ asset('/css/pikaday.css') }}">
     <link href="{{ asset('dist/bundle.css') }}" rel="stylesheet">
 
     <style>

@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreStudent extends FormRequest
 {
@@ -14,30 +15,6 @@ class StoreStudent extends FormRequest
     public function authorize()
     {
         return true;
-    }
-
-    public function withValidator($validator)
-    {
-        /*
-        $validator->after(function ($validator) {
-            if ($this->checkScheduleDaysValue()) {
-                $validator->errors()->add('schedule_days', 'One of the preferred days has an incorrect value');
-            }
-        });
-        */
-    }
-
-    private function checkScheduleDaysValue()
-    {
-        $allowed = ['M', 'T', 'W', 'Th', 'F', 'S'];
-        $hasError = false;
-        foreach ($this->input('schedule_days') as $day) {
-            if (!in_array($day, $allowed)) {
-                $hasError = true;
-            }
-        }
-
-        return $hasError;
     }
 
     /**
@@ -57,51 +34,113 @@ class StoreStudent extends FormRequest
             case 'POST':
             {
                 return [
-                    'username' => 'required|min:4|max:50|unique:students,username',
-                    'password' => 'required',
-                    'password_repeat' => 'required|same:password',
-                    'full_name' => 'required',
-                    'email' => 'required|email|unique:students,email',
-                    'personal_contact_number' => 'numeric',
-                    'skype' => 'required|max:30',
-                    'birthday' => [
-                        'date_format:d F Y'
+                    'data.username' => [
+                        'required',
+                        'min:4',
+                        'max:50',
+                        'unique:students,username'
                     ],
-                    'schedule_days' => 'array',
-                    'schedule_start_time' => [
-                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
+
+                    'data.password' => [
+                        'required'
                     ],
-                    'schedule_start_date' => [
-                        'date_format:d F Y'
+
+                    'data.password_repeat' => [
+                        'required',
+                        'same:data.password'
+                    ],
+
+                    'data.full_name' => [
+                        'required',
+                        'max:100'
+                    ],
+
+                    'data.email' => [
+                        'required',
+                        'email',
+                        'unique:students,email'
+                    ],
+
+                    'data.personal_contact_number' => [
+                        'nullable',
+                        'numeric'
+                    ],
+
+                    'data.skype' => [
+                        'required',
+                        'max:30'
+                    ],
+
+                    'data.birthday' => [
+                        'nullable',
+                        'date'
+                    ],
+
+                    'data.country_code' => [
+                        'required_if:type,info',
+                        'min:2',
+                        'max:2',
+                        Rule::exists('countries', 'code_iso3166_a2')
                     ]
                 ];
             }
             case 'PUT':
             case 'PATCH':
             {
-                return [
-                    'username' => 'required|min:4|max:50|unique:students,username,'. $this->input('username') .',username',
-                    'password' => 'sometimes|present',
-                    'password_repeat' => 'sometimes|present|same:password',
-                    'full_name' => 'required',
-                    'email' => 'required|email|unique:students,email,'. $this->input('email') .',email',
-                    'personal_contact_number' => 'required|numeric',
-                    'skype' => 'required|max:30',
-                    'birthday' => [
-                        'required',
-                        'date_format:d F Y'
+                $rules = [
+                    'data.username' => [
+                        'required_if:type,credentials',
+                        'min:4',
+                        'max:50',
+                        Rule::unique('students', 'username')->ignore($this->route('student'))
                     ],
-                    'schedule_days' => 'required|array',
-                    'schedule_start_time' => [
-                        'required',
-                        'regex:/[0-9][0-9]\:[0-9][0-9]/'
+
+                    'data.email' => [
+                        'required_if:type,credentials',
+                        'email',
+                        Rule::unique('students', 'email')->ignore($this->route('student'))
                     ],
-                    'schedule_start_date' => [
-                        'required',
-                        'date_format:d F Y'
+
+                    'data.new_password' => [
+                        'required_if:type,password'
+                    ],
+
+                    'data.new_password_repeat' => [
+                        'required_if:type,password',
+                        'same:data.new_password'
+                    ],
+
+                    'data.full_name' => [
+                        'required_if:type,info',
+                        'max:100'
+                    ],
+
+                    'data.personal_contact_number' => [
+                        'nullable',
+                        'numeric'
+                    ],
+
+                    'data.skype' => [
+                        'required_if:type,info',
+                        'max:30'
+                    ],
+
+                    'data.birthday' => [
+                        'nullable',
+                        'date_format:Y-m-d'
+                    ],
+
+                    'data.country_code' => [
+                        'required_if:type,info',
+                        'min:2',
+                        'max:2',
+                        Rule::exists('countries', 'code_iso3166_a2')
                     ]
                 ];
+
+                return $rules;
             }
+
             default:break;
         }
     }

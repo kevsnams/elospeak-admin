@@ -27,11 +27,33 @@ class ClassroomsController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
+    public function index(Request $request)
     {
-        return view('classrooms.index', [
-            'classrooms' => Classroom::all()
-        ]);
+        $teacher = $request->teacher;
+        $student = $request->student;
+        $start = $request->start;
+        $end = $request->end;
+        $with = $request->input('with', []);
+
+        $classrooms = Classroom::with($with)->where(function ($query) use ($teacher, $student, $start, $end) {
+            if ($teacher) {
+                $query->where('teacher_id', $teacher);
+            }
+
+            if ($student) {
+                $query->where('student_id', $student);
+            }
+
+            if ($start) {
+                $query->whereRaw('DATE(start) >= ?', [$start]);
+            }
+
+            if ($end) {
+                $query->whereRaw('DATE(end) <= ?', [$end]);
+            }
+        })->get();
+
+        return response()->json($classrooms->toArray());
     }
 
     /**
@@ -72,11 +94,9 @@ class ClassroomsController extends Controller
      */
     public function show(Request $request, $id)
     {
-        if ($request->ajax()) {
-            $classroom = Classroom::with('teacher')->findOrFail($id);
+        $classroom = Classroom::with('teacher')->findOrFail($id);
 
-            return response()->json($classroom->toArray());
-        }
+        return response()->json($classroom->toArray());
     }
 
     /**
@@ -99,35 +119,72 @@ class ClassroomsController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $request->validate([
-            'teacher_id' => 'sometimes|exists:teachers,id',
-            'classroom_id' => 'required|exists:classrooms,id',
-            'timeslot' => [
+        // TODO Make a custom Request object
+        $isBatch = $id === 'batch';
+
+        $rules = [
+            'data.teacher' => [
+                'sometimes',
                 'required',
-                'regex:/[0-9][0-9]\:[0-9][0-9]|[0-9][0-9]\:[0-9][0-9]/'
+                'exists:teachers,id'
             ],
-            'date' => 'required|date_format:Y-n-j',
-            'status' => 'required|in:'. implode(',', array_keys(Classroom::statusArray()))
-        ]);
 
-        $timeslots = explode('|', $request->input('timeslot'));
-        
-        $start = new Carbon($request->input('date') .' '. $timeslots[0]);
-        $end = new Carbon($request->input('date') .' '. $timeslots[1]);
+            'data.status' => [
+                'sometimes',
+                'required',
+                Rule::in(Classroom::status()->pluck(0)->toArray())
+            ],
 
-        $classroom = Classroom::findOrFail($request->input('classroom_id'));
+            'data.start' => [
+                'sometimes',
+                'required',
+                'date_format:Y-m-d H:i'
+            ],
 
-        if ($request->input('teacher_id')) {
-            $classroom->teacher_id = (int) $request->input('teacher_id');
+            'data.end' => [
+                'sometimes',
+                'required',
+                'date_format:Y-m-d H:i'
+            ]
+        ];
+
+        if ($isBatch) {
+            $rules['data.ids'] = [
+                'sometimes',
+                'array',
+                Rule::requiredIf($isBatch),
+                Rule::exists('classrooms', 'id')->whereIn('id', $request->input('data.ids'))
+            ];
         }
 
-        $classroom->start = $start->format('Y-m-d H:i:s');
-        $classroom->end = $end->format('Y-m-d H:i:s');
-        $classroom->status = (int) $request->input('status');
+        $this->validate($request, $rules);
 
-        $classroom->save();
+        if ($isBatch) {
+            $model = Classroom::whereIn('id', $request->input('data.ids'));
+        } else {
+            $model = Classroom::where('id', $id);
+        }
 
-        return response()->json(['success' => true]);
+        $data = [];
+        foreach ($request->input('data') as $col => $value) {
+            if ($col == 'ids') {
+                continue;
+            }
+
+            $newCol = $col;
+
+            if ($col == 'teacher' || $col == 'student') {
+                $newCol = $col .'_id';
+            }
+
+            if (filled($value)) {
+                $data[$newCol] = $value;
+            }
+        }
+        
+        $model->update($data);
+
+        return response()->json([1]);
     }
 
     /**
@@ -141,43 +198,8 @@ class ClassroomsController extends Controller
         //
     }
 
-    public function timeslots(Request $request)
+    public function getStatusAction()
     {
-        $studentId = $request->input('student_id');
-        $date = $request->input('date');
-
-        $timeslots = Timeslots::getAvailableByDate($date, 'student', $studentId);
-
-        return response()->json($timeslots->getSlots());
-    }
-
-    public function teachers(Request $request)
-    {
-        $classroomId = $request->input('classroom_id');
-        $search = trim($request->input('query'));
-
-        $classroom = Classroom::with('teacher')->findOrFail($classroomId);
-        $teachers = Teacher::where(function ($query) use ($search, $classroom) {
-            $query->where('id', '<>', $classroom->teacher_id);
-            if (strlen($search)) {
-                $query->where(function($searchQuery) use ($search) {
-                    $searchQuery->where('id', $search)
-                        ->orWhere('full_name', 'LIKE', $search .'%')
-                        ->orWhere('username', 'LIKE', $search .'%');
-                });
-            }
-        })->whereDoesntHave('classrooms', function (Builder $query) use ($classroom) {
-            $query->where('teacher_id', '<>', $classroom->teacher_id)
-                ->where('start', '<>', $classroom->start)
-                ->where('end', '<>', $classroom->end);
-        })->orWhereHas('classrooms', function (Builder $query) use ($classroom) {
-            $query->where('teacher_id', '<>', $classroom->teacher_id)
-                ->where('start', '<>', $classroom->start)
-                ->where('end', '<>', $classroom->end);
-        })->get();
-
-        return response()->json([
-            'availableTeachers' => $teachers->toArray()
-        ]);
+        return response()->json(Classroom::status()->toArray());
     }
 }

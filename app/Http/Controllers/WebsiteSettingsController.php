@@ -69,24 +69,4 @@ class WebsiteSettingsController extends Controller
 
         return response()->json($response);
     }
-
-    public function save(Request $request)
-    {
-        $input = $request->validate([
-            'CLASSROOM.price_per_class' => 'required|numeric',
-            'CLASSROOM.duration' => 'required|integer',
-            'CLASSROOM.price_per_class_weekend' => 'required|numeric',
-            'TEACHER.salary_per_class' => 'required|numeric',
-            'CLASSROOM.offset' => 'required|numeric'
-        ]);
-        
-        foreach ($input as $group => $settings) {
-            foreach ($settings as $setting => $value) {
-                $key = $group .'.'. $setting;
-                WebsiteSetting::updateOrInsert(['key' => $key], ['value' => $value]);
-            }
-        }
-
-        return redirect(route('settings.index'))->with('saveSuccess', true);
-    }
 }

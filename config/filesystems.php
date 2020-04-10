@@ -42,6 +42,10 @@ return [
     */
 
     'disks' => [
+        'shared_local' => [
+            'driver' => 'local',
+            'root' => base_path('../shared')
+        ],
 
         'local' => [
             'driver' => 'local',

@@ -3,15 +3,27 @@
 namespace App;
 
 use Illuminate\Database\Eloquent\Model;
+use Carbon\Carbon;
+use App\Enrollment;
 
 class Student extends Model
 {
     public $hidden = ['password'];
-    public $appends = ['age', 'birthday_human'];
+    public $appends = ['age', 'birthday_human', 'user_type', 'has_active_enrollment'];
 
-    public function classroomSchedulePreference()
+    public function country()
     {
-        return $this->hasOne('App\ClassroomSchedulePreference');
+        return $this->hasOne('App\Country', 'code_iso3166_a2', 'country_code');
+    }
+
+    public function enrollments()
+    {
+        return $this->hasMany('App\Enrollment', 'student_id');
+    }
+
+    public function classrooms()
+    {
+        return $this->hasMany('App\Classroom');
     }
 
     public function transactions()
@@ -19,9 +31,22 @@ class Student extends Model
         return $this->hasMany('App\StudentTransaction');
     }
 
-    public function classrooms()
+    public function getHasActiveEnrollmentAttribute()
     {
-        return $this->hasMany('App\Classroom');
+        if ($this->enrollments->count() > 0) {
+            $have = $this->enrollments->first(function ($value) {
+                return $value['active'] == Enrollment::ACTIVE;
+            });
+
+            return !is_null($have);
+        }
+
+        return false;
+    }
+
+    public function getUserTypeAttribute()
+    {
+        return 'student';
     }
 
     public function getFullNameAttribute($value)
@@ -31,10 +56,10 @@ class Student extends Model
 
     public function getBirthdayHumanAttribute()
     {
-        return date('j F Y', strtotime($this->birthday));
+        return $this->birthday ? date('j F Y', strtotime($this->birthday)) : null;
     }
 
     public function getAgeAttribute() {
-        return idate('Y') - idate('Y', strtotime($this->birthday));
+        return $this->birthday ? idate('Y') - idate('Y', strtotime($this->birthday)) : null;
     }
 }

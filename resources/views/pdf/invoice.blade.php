@@ -3,127 +3,177 @@
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>Invoice for {{ $student->full_name }}</title>
-    <link rel="stylesheet" href="{{ asset('/uikit-3.1.7/css/uikit.min.css') }}">
+    <link rel="stylesheet" type="text/css" href="{{ asset('/css/bootstrap.min.css') }}">
     <style>
         body {
-            font-family: DejaVu Sans, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: rgba(0, 0, 0, .7);
-            font-size: 0.8em;
+            /*font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;*/
+            color: #212529;
         }
 
-        .wrapper {
-            margin: 0 auto;
+        h1 {
+            font-size: 2rem;
+            font-weight: bolder;
+        }
+
+        .sub-h {
+            font-size: 1rem;
             display: block;
+        }
+
+        .slash {
+            color: #212529;
+            font-weight: bold;
+        }
+
+        h1.invoice {
+            font-size: 1.8rem;
+            font-weight: bolder;
         }
     </style>
 </head>
 <body>
-    <div class="wrapper">
-        <table class="uk-table uk-table-small">
-            <thead>
+    <?php
+        $contacts = array_filter([
+            env('COMPANY_WEBSITE'),
+            env('COMPANY_TELEPHONE'),
+            env('COMPANY_EMAIL')
+        ], function ($env) {
+            return filled($env);
+        });
+
+        $studentContacts = array_filter([
+            $student->full_name,
+            $student->email,
+            $student->personal_contact_number
+        ], function ($info) {
+            return filled($info);
+        });
+
+        $units = $items->groupBy('type')->sortBy('start');
+    ?>
+
+    <table class="table table-borderless">
+        <tbody>
+            <tr>
+                <td>
+                    <h1>{{ env('COMPANY_NAME', 'ELOSpeak Pty') }}</h1>
+
+                    @if (filled(env('COMPANY_ADDRESS_1')))
+                        <span class="sub-h text-secondary">{{ env('COMPANY_ADDRESS_1') }}</span>
+                    @endif
+
+                    @if (filled(env('COMPANY_ADDRESS_2')))
+                        <span class="sub-h text-secondary">{{ env('COMPANY_ADDRESS_2') }}</span>
+                    @endif
+
+                    @if (!empty($contacts))
+                        <span class="sub-h text-secondary">
+                            {!! implode(' <span class="slash">/</span> ', $contacts) !!}
+                        </span>
+                    @endif
+                </td>
+                <td>
+                    <h1 class="invoice text-muted text-right">INVOICE</h1>
+                    <table class="table table-borderless">
+                        <tbody>
+                            <tr>
+                                <td class="text-right"><strong>Date:</strong></td>
+                                <td>{{ $enrollment->created_at->format('F j, Y')}}</td>
+                            </tr>
+
+                            <tr>
+                                <td class="text-right"><strong>Invoice #:</strong></td>
+                                <td>INV{{ $enrollment->id }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <table class="table table-borderless">
+        <tbody>
+            <tr>
+                <td class="text-right">
+                    <strong>Bill To:</strong>
+                </td>
+                <td>
+                    @if (count($studentContacts))
+                        @foreach ($studentContacts as $contact)
+                            <span class="d-block">{{ $contact }}</span>
+                        @endforeach
+                    @endif
+                </td>
+                <td>
+                    <strong class="d-block" style="font-size: 1.5rem;">
+                        Total Invoice
+                    </strong>
+                    <strong class="d-block" style="font-size: 2rem;">
+                        {{ $country->currency_code }} 
+                        {{
+                            number_format($units->sum(function ($unit) {
+                                return $unit->sum('price');
+                            }), 2)
+                        }}
+                    </strong>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <hr>
+    <table class="mt-4 table table-sm">
+        <thead class="thead-light">
+            <tr>
+                <th>Description</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Line Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($units as $label => $group)
+
                 <tr>
-                    <th class="uk-width-auto">&nbsp;</th>
-                    <th class="uk-width-auto">&nbsp;</th>
+                    <td>{{ $label }}</td>
+                    <td colspan="3">{{ $group->count() }}</td>
                 </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>
-                        <h1 class="uk-heading-medium">ELOSpeak</h1>
-                        <ul class="uk-list">
-                            <li>Bldg. 32, Gangnam Street</li>
-                            <li>Seoul, South Korea</li>
-                            <li>051-212-3456</li>
-                        </ul>
-                        <hr>
-                        <span class="uk-text-lead">Bill To:</span>
-                        <ul class="uk-list">
-                            <li>{{ $student->full_name }}</li>
-                            <li>Email: {{ $student->email }}</li>
-                            <li>Skype: {{ $student->skype }}</li>
-                            <li>{{ $student->personal_contact_number }}</li>
-                        </ul>
-                    </td>
-
-                    <td>
-                        <div class="uk-text-right">
-                            <h3 class="uk-heading-small">Invoice</h3>
-                            <dl class="uk-description-list">
-                                <dt><strong>Date Issued</strong></dt>
-                                <dd>{{ date('F j Y', strtotime($invoice->created_at)) }}</dd>
-                            </dl>
-
-                            <dl class="uk-description-list">
-                                <dt><strong>Invoice ID</strong></dt>
-                                <dd>{{ $invoice->id }}</dd>
-                            </dl>
-
-                            <dl class="uk-description-list">
-                                <dt><strong>Transaction ID</strong></dt>
-                                <dd>{{ $transaction_id }}</dd>
-                            </dl>
-
-                            <dl class="uk-description-list">
-                                <dt><strong>Student ID</strong></dt>
-                                <dd>{{ $student->id }}</dd>
-                            </dl>
-
-                            <dl class="uk-description-list">
-                                <dt><strong>Billing Period</strong></dt>
-                                <dd>{{ $startDate->format('j F Y') }} &#8212; {{ $endDate->format('j F Y') }}</dd>
-                            </dl>
-                        </div>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        
-        <table class="uk-table uk-table-small uk-table-divider">
-            <thead>
-                <tr>
-                    <th class="uk-table-expand">Description</th>
-                    <th class="uk-table-shrink">Qty</th>
-                    <th class="uk-width-auto">Unit Price</th>
-                    <th class="uk-width-small">Amount</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach ($classes as $day => $info)
+                
+                @foreach ($group as $unit)
                     <tr>
-                        <td colspan="3"><em>{{ $info['date'] }}</em> class</td>
+                        <td>
+                            <span class="ml-5">{{ $unit['start']->format('F d, Y h:i A') }} &#8212; {{ $unit['end']->format('h:i A') }}</span>
+                        </td>
+                        <td>&nbsp;</td>
+                        <td>{{ $country->currency_code }} {{ number_format($unit['is_weekend'] ? $country->price_weekend : $country->price, 2) }}</td>
                         <td>&nbsp;</td>
                     </tr>
-
-                    @foreach ($info['slots'] as $slot)
-                        <tr>
-                            <td>
-                                <div class="uk-margin-medium-left">{{ $slot['start']}} &#8212; {{ $slot['end'] }}</div>
-                            </td>
-                            <td>1</td>
-                            <td>{{ $slot['price'] }} KRW</td>
-                            <td>{{ $slot['price'] }} KRW</td>
-                        </tr>
-                    @endforeach
                 @endforeach
-                
+
                 <tr>
-                    <td class="uk-text-right" colspan="3">
-                        TOTAL NUMBER OF CLASSES
-                    </td>
+                    <td colspan="3">&nbsp;</td>
                     <td>
-                        <strong>{{ $totalClasses }}</strong>
+                        <strong>{{ $country->currency_code }} {{ number_format($group->sum('price'), 2) }}</strong>
                     </td>
                 </tr>
-                <tr>
-                    <td class="uk-text-right" colspan="3">
-                        TOTAL AMOUNT
-                    </td>
-                    <td>
-                        <strong>{{ number_format($totalAmount) }} KRW</strong>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
+
+            @endforeach
+            <tr>
+                <td colspan="2">&nbsp;</td>
+                <td>
+                    <strong style="font-size: 1.5rem;">Total</strong>
+                </td>
+                <td>
+                    <strong style="font-size: 1.5rem;">
+                        {{ $country->currency_code }} 
+                        {{
+                            number_format($units->sum(function ($unit) {
+                                return $unit->sum('price');
+                            }), 2)
+                        }}
+                    </strong>
+                </td>
+            </tr>
+        </tbody>
+    </table>
 </body>
 </html>
