@@ -2,12 +2,19 @@ import HomeComponent from './routes/Home.svelte';
 import TeachersComponent from './routes/Teachers.svelte';
 import StudentsComponent from './routes/Students.svelte';
 import SettingsComponent from './routes/Settings.svelte';
+import StudentComponent from './routes/Student.svelte';
+import EnrollComponent from './routes/Enroll.svelte';
 
 const routes = {
     '/': HomeComponent,
     '/teachers': TeachersComponent,
     '/students': StudentsComponent,
-    '/settings': SettingsComponent
+
+    '/settings/:page?': SettingsComponent,
+
+    '/student/:id': StudentComponent,
+    '/student/:id/:page?': StudentComponent,
+    '/enroll/:id': EnrollComponent
 };
 
 export default routes;

@@ -1,30 +1,54 @@
 <script>
-import _ from 'underscore';
+import _ from 'lodash';
 import {onMount} from 'svelte';
 import axios from 'axios';
 import jq from 'jquery';
+import Pikaday from 'pikaday';
+
 import {
     UserPlusIcon,
     UserIcon,
-    PhoneIcon
+    PhoneIcon,
+    HelpCircleIcon
 } from 'svelte-feather-icons';
 
-let isInitiated = false, students = [], filteredStudents = [];
+axios.get('./countries', {
+    params: {
+        is_defined: true
+    }
+}).then((resp) => {
+    countries = resp.data;
+});
+
+let isInitiated = false, students = [], filteredStudents = [], countries = [], birthday;
 
 onMount(async () => {
     try {
-        const xhr = await axios.get('./students');
+        const fetchStudents = await axios.get('./students');
+        const fetchCountries = await axios.get('./countries', {
+            params: {
+                is_defined: true
+            }
+        });
 
-        xhr.data.forEach((data) => {
+        fetchStudents.data.forEach((data) => {
             students = [...students, data];
         });
-        
-        filteredStudents = students;
 
+        filteredStudents = students;
+        countries = fetchCountries.data;
         isInitiated = true;
+
+        const now = new Date();
+        const picker = new Pikaday({
+            field: birthday,
+            yearRange: [now.getFullYear() - 80, now.getFullYear()]
+        });
     } catch (e) {
         // ERROR
     }
+
+    jq('[data-toggle="popover"]').popover();
 });
 
 let keywords;
@@ -61,28 +85,24 @@ async function submitAddForm()
     try {
         const xhr = await axios.post('./students', data);
 
-        if (xhr.data.success) {
-            isAddSuccess = true;
-            setTimeout(() => {
-                jq('#add-modal').modal('hide');
-                top.location.href = `#/student/?id=${xhr.data.id}`;
-            }, 1000);
-        }
+        isAddSuccess = true;
+        setTimeout(() => {
+            jq('#add-modal').modal('hide');
+            top.location.href = `#/student/?id=${xhr.data[0]}`;
+        }, 1000);
     } catch (e) {
         if (e.response.status == 422) {
-            hasErrors = true;
-            for (let key in e.response.data.errors) {
-                addErrors = [
-                    ...addErrors,
-                    e.response.data.errors[key][0]
-                ];
 
-                jq(`#add_${key}`).addClass('is-invalid');
+            _.forEach(e.response.data.errors, (value, key) => {
+                const col = key.replace('data.', '');
+                const text = value[0].replace(/data\./g, '');
 
-                const fb = jq(`#fb-${key}`);
+                const fb = jq(`#fb-${col}`);
+                jq(`#add_${col}`).addClass('is-invalid');
+
                 fb.addClass('invalid-feedback d-block');
-                fb.text(e.response.data.errors[key][0]);
-            }
+                fb.text(text);
+            });
         }
     }
     
@@ -123,47 +143,78 @@ async function submitAddForm()
                     </div>
                 {/if}
 
-                <form bind:this={addForm} novalidate>
-                    <div class="form-group">
-                        <label for="add_username">Username <span class="required">*</span></label>
-                        <input type="text" class="form-control t" id="add_username" name="username">
-                        <div id="fb-username" class="d-none"></div>
+                <form bind:this={addForm} novalidate on:submit|preventDefault={submitAddForm}>
+                    <div class="form-row">
+                        <div class="form-group col">
+                            <label for="add_username">Username <span class="required">*</span></label>
+                            <input type="text" class="form-control t" id="add_username" name="data[username]">
+                            <div id="fb-username" class="d-none"></div>
+                        </div>
+
+                        <div class="form-group col">
+                            <label for="add_email">Email <span class="required">*</span></label>
+                            <input type="email" class="form-control t" id="add_email" name="data[email]">
+                            <div id="fb-email" class="d-none"></div>
+                        </div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="add_password">Password <span class="required">*</span></label>
-                        <input type="password" class="form-control t" id="add_password" name="password">
-                        <div id="fb-password" class="d-none"></div>
-                    </div>
+                    <div class="form-row">
+                        <div class="form-group col">
+                            <label for="add_password">Password <span class="required">*</span></label>
+                            <input type="password" class="form-control t" id="add_password" name="data[password]">
+                            <div id="fb-password" class="d-none"></div>
+                        </div>
 
-                    <div class="form-group">
-                        <label for="add_password_repeat">Password <span class="required">*</span></label>
-                        <input type="password" class="form-control t" id="add_password_repeat" name="password_repeat">
-                        <div id="fb-password_repeat" class="d-none"></div>
+                        <div class="form-group col">
+                            <label for="add_password_repeat">Repeat Password <span class="required">*</span></label>
+                            <input type="password" class="form-control t" id="add_password_repeat" name="data[password_repeat]">
+                            <div id="fb-password_repeat" class="d-none"></div>
+                        </div>
                     </div>
 
                     <div class="form-group">
                         <label for="add_full_name">Full Name <span class="required">*</span></label>
-                        <input type="text" class="form-control t" id="add_full_name" name="full_name">
+                        <input type="text" class="form-control t" id="add_full_name" name="data[full_name]">
                         <div id="fb-full_name" class="d-none"></div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="add_email">Email <span class="required">*</span></label>
-                        <input type="email" class="form-control t" id="add_email" name="email">
-                        <div id="fb-email" class="d-none"></div>
+                    <div class="form-row">
+                        <div class="form-group col">
+                            <label for="add_skype">Skype <span class="required">*</span></label>
+                            <input type="text" class="form-control t" id="add_skype" name="data[skype]">
+                            <div id="fb-skype" class="d-none"></div>
+                        </div>
+
+                        <div class="form-group col">
+                            <label for="add_birthday">Birthday</label>
+                            <input type="text" class="form-control t" id="add_birthday" name="data[birthday]" placeholder="YYYY-MM-DD">
+                            <div id="fb-birthday" class="d-none"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group col">
+                            <label for="add_personal_contact_number">Personal Contact Number</label>
+                            <input type="text" class="form-control t" id="add_personal_contact_number" name="data[personal_contact_number]">
+                            <div id="fb-personal_contact_number" class="d-none"></div>
+                        </div>
+                        <div class="form-group col">
+                            <label for="add_country_code" data-toggle="popover" data-trigger="hover" data-placement="right" data-content="Countries that are not listed in this field means that its prices per class, and currency is not yet defined. Go to Settings &raquo; Countries to configure">
+                                Country <span class="text-primary"><HelpCircleIcon /></span> <span class="required">*</span>
+                            </label>
+                            <select class="form-control custom-select t" id="add_country_code" name="data[country_code]">
+                                {#each countries as country}
+                                    <option value={country.code}>{country.name}</option>
+                                {/each}
+                            </select>
+                            <div id="fb-country_code" class="d-none"></div>
+                        </div>
                     </div>
 
                     <div class="form-group">
-                        <label for="add_skype">Skype <span class="required">*</span></label>
-                        <input type="text" class="form-control t" id="add_skype" name="skype">
-                        <div id="fb-skype" class="d-none"></div>
+                        <button type="submit" class="btn btn-primary"><UserPlusIcon /> Add</button>
                     </div>
                 </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-primary" on:click={submitAddForm}>Create</button>
             </div>
         </div>
     </div>
@@ -188,7 +239,7 @@ async function submitAddForm()
                     <td>{student.id}</td>
                     <td>
                         <UserIcon />
-                        <a href="#/student/?id={student.id}">
+                        <a href="#/student/{student.id}">
                             {student.full_name}
                         </a>
                     </td>

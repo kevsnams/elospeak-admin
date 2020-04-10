@@ -7,5 +7,4 @@ const app = new App({
 		csrf_token: document.querySelector('meta[name="csrf-token"]').getAttribute('content')
 	}
 });
-
 export default app;
