@@ -46,7 +46,6 @@ class StudentsController extends Controller
 
     public function store(StoreStudentRequest $request)
     {
-        $input = $request->validated();
         $student = new Student();
 
         foreach ($request->validated()['data'] as $col => $value) {
@@ -125,7 +124,7 @@ class StudentsController extends Controller
             if ($col == 'birthday') {
                 $finalValue = date('Y-m-d', strtotime($value));
             }
-
+            
             $student->{$finalCol} = $finalValue;
         }
 

@@ -2,7 +2,7 @@
 export let csrf_token;
 
 import Router from 'svelte-spa-router';
-import {link} from 'svelte-spa-router';
+import { link } from 'svelte-spa-router';
 import active from 'svelte-spa-router/active'
 import routes from './routes';
 

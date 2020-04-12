@@ -46,22 +46,26 @@ class TeachersController extends Controller
      */
     public function store(StoreTeacherRequest $request)
     {
-        $input = $request->validated();
-
         $teacher = new Teacher();
-        $teacher->username = $input['username'];
-        $teacher->password = Hash::make($input['password']);
-        $teacher->full_name = ucwords($input['full_name']);
-        $teacher->salary = $input['salary'];
-        $teacher->email = $input['email'];
-        $teacher->skype = $input['skype'];
-        $teacher->educational_attainment = $input['educational_attainment'];
+
+        foreach ($request->input('data') as $column => $value) {
+            if ($column === 'password_repeat') {
+                continue;
+            }
+
+            $newValue = $value;
+
+            if ($column == 'password') {
+                $newValue = Hash::make($value);
+            }
+
+            $teacher->{$column} = $newValue;
+        }
 
         $teacher->save();
 
         return response()->json([
             'success' => true,
-            'method' => 'store',
             'id' => $teacher->id
         ]);
     }
@@ -99,29 +103,25 @@ class TeachersController extends Controller
      */
     public function update(StoreTeacherRequest $request, $id)
     {
-        $input = $request->validated();
+        $teacher = Teacher::findOrFail($id);
 
-        $teacher = Teacher::find($id);
-        $teacher->username = $input['username'];
+        foreach ($request->input('data') as $column => $value) {
+            if ($column == 'password_repeat') {
+                continue;
+            }
 
-        if (isset($input['password']) && !empty($input['password'])) {
-            $teacher->password = Hash::make($input['password']);
+            $newValue = $value;
+
+            if ($column == 'password') {
+                $newValue = Hash::make($value);
+            }
+
+            $teacher->{$column} = $newValue;
         }
-
-        $teacher->full_name = $input['full_name'];
-        $teacher->email = $input['email'];
-        $teacher->personal_contact_number = $input['personal_contact_number'];
-        $teacher->skype = $input['skype'];
-        $teacher->address = $input['address'];
-        $teacher->educational_attainment = $input['educational_attainment'];
-        $teacher->birthday = date('Y-m-d', strtotime($input['birthday']));
 
         $teacher->save();
 
-        return response()->json([
-            'success' => true,
-            'method' => 'update'
-        ]);
+        return response()->json([true]);
     }
 
     /**
@@ -142,6 +142,6 @@ class TeachersController extends Controller
 
     public function getEducationalAttainment()
     {
-        return response()->json(Teacher::getEducationalAttainmentValues());
+        return response()->json(Teacher::educationalAttainments()->toArray());
     }
 }

@@ -15,7 +15,7 @@ class CustomerMessagesController extends Controller
      */
     public function index()
     {
-        $customerMessages = CustomerMessage::orderBy('created_at', 'asc')->get();
+        $customerMessages = CustomerMessage::orderBy('created_at', 'desc')->get();
 
         return response()->json($customerMessages->toArray());
     }

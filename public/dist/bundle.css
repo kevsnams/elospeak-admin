@@ -20,5 +20,9 @@
 .adjust-icon.svelte-cwnlns.svelte-cwnlns{font-size:1.5rem}.student-form.svelte-cwnlns label.svelte-cwnlns{font-size:.8rem;font-weight:bold}
 .f.svelte-119ij5u{font-size:0.7em}
 .l.svelte-1cnaqgk.svelte-1cnaqgk{display:block;font-size:0.7em;font-weight:bold}.calendar-controls.svelte-1cnaqgk .ctrl.svelte-1cnaqgk{padding:.5rem;border-radius:.355rem;margin-top:2rem;box-shadow:0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08)}
+.profile-form.svelte-8fusl8{box-shadow:0 0 0 1px rgba(43, 45, 80, 0.1),
+        0 2px 5px 0 rgba(43, 45, 80, 0.08),
+        0 1px 1.5px 0 rgba(0, 0, 0, 0.07),
+        0 1px 2px 0 rgba(0, 0, 0, 0.08);border-radius:.355rem;padding:1rem;margin-bottom:1rem}
 
 /*# sourceMappingURL=bundle.css.map */

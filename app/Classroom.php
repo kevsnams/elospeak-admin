@@ -12,7 +12,7 @@ class Classroom extends Model
     const STATUS_DONE = 2;
     const STATUS_CANCELLED = 3;
 
-    public $appends = ['start_raw', 'end_raw'];
+    public $appends = ['start_raw', 'end_raw', 'status_text'];
 
     public static function status()
     {
@@ -35,7 +35,7 @@ class Classroom extends Model
 
     public function enrollment()
     {
-        return $this->belongsTo('App\Enrollment', 'enrollment_id');
+        return $this->belongsTo('App\Enrollment');
     }
     
     public function getStartAttribute($value)

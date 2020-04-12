@@ -17,6 +17,14 @@ class Teacher extends Model
         return $this->hasMany('App\Classroom');
     }
 
+    public static function educationalAttainments()
+    {
+        return collect([
+            [self::EDUC_UNDERGRADUATE, 'Undergraduate'],
+            [self::EDUC_COLLEGE_GRADUATE, 'College Graduate']
+        ]);
+    }
+
     public static function getEducationalAttainmentValues()
     {
         return [
@@ -46,6 +54,8 @@ class Teacher extends Model
 
     public function getEducationalAttainmentValueAttribute()
     {
-        return self::getEducationalAttainmentValues()[$this->educational_attainment];
+        $ea = self::educationalAttainments()->firstWhere(0, $this->educational_attainment);
+
+        return $ea ? $ea[1] : null;
     }
 }

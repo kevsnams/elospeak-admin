@@ -146,7 +146,7 @@ async function removeTeacher(id)
                     <td>{teacher.id}</td>
                     <td>
                         <UserIcon />
-                        <a href="#/teacher/?id={teacher.id}">
+                        <a href="#/teacher/{teacher.id}">
                             {teacher.full_name}
                         </a>
                     </td>
@@ -235,50 +235,57 @@ async function removeTeacher(id)
                 <form novalidate on:submit|preventDefault={submitAddTeacher}>
                     <div class="form-group">
                         <label for="teacher-username">Username <span class="required">*</span></label>
-                        <input type="text" class="form-control t" id="teacher-username" name="username">
+                        <input type="text" class="form-control t" id="teacher-username" name="data[username]">
                     </div>
 
                     <div class="form-group">
                         <label for="teacher-email">Email <span class="required">*</span></label>
-                        <input type="email" class="form-control t" id="teacher-email" name="email">
+                        <input type="email" class="form-control t" id="teacher-email" name="data[email]">
                     </div>
 
                     <div class="d-flex mb-2">
                         <div class="w-auto mr-2">
                             <label for="teacher-password">Password <span class="required">*</span></label>
-                            <input type="password" class="form-control t" id="teacher-password" name="password">
+                            <input type="password" class="form-control t" id="teacher-password" name="data[password]">
                         </div>
 
                         <div class="w-auto">
                             <label for="teacher-password_repeat">Password Repeat<span class="required">*</span></label>
-                            <input type="password" class="form-control t" id="teacher-password_repeat" name="password_repeat">
+                            <input type="password" class="form-control t" id="teacher-password_repeat" name="data[password_repeat]">
                         </div>
                     </div>
 
                     <div class="form-group">
                         <label for="teacher-full_name">Full Name <span class="required">*</span></label>
-                        <input type="text" class="form-control t" id="teacher-full_name" name="full_name">
+                        <input type="text" class="form-control t" id="teacher-full_name" name="data[full_name]">
                     </div>
                     
                     <div class="d-flex mb-2">
                         <div class="w-auto mr-2">
                             <label for="teacher-skype">Skype <span class="required">*</span></label>
-                            <input type="text" class="form-control t" id="teacher-skype" name="skype">
+                            <input type="text" class="form-control t" id="teacher-skype" name="data[skype]">
                         </div>
 
                         <div class="w-auto">
-                            <label for="teacher-salary">Salary per class <span class="required">*</span></label>
-                            <input type="text" class="form-control t" id="teacher-salary" name="salary">
+                            <label for="teacher-educational_attainment">Educational Attainment <span class="required">*</span></label>
+                            <select class="custom-select t" id="teacher-educational_attainment" name="data[educational_attainment]">
+                                {#each educationalAttainment as ea}
+                                    <option value={ ea[0] }>{ ea[1] }</option>
+                                {/each}
+                            </select>
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="teacher-educational_attainment">Educational Attainment <span class="required">*</span></label>
-                        <select class="form-control t" id="teacher-educational_attainment" name="educational_attainment">
-                            {#each educationalAttainment as ea, i}
-                                <option value={i}>{ea}</option>
-                            {/each}
-                        </select>
+                    <div class="d-flex mb-3">
+                        <div class="w-auto mr-2">
+                            <label for="teacher-salary">Weekday Salary (per class) <span class="required">*</span></label>
+                            <input type="text" class="form-control t" id="teacher-salary" name="data[salary]">
+                        </div>
+
+                        <div class="w-auto">
+                            <label for="teacher-salary">Weekend Salary (per class) <span class="required">*</span></label>
+                            <input type="text" class="form-control t" id="teacher-salary" name="data[salary_weekend]">
+                        </div>
                     </div>
 
                     <button type="submit" class="btn btn-success t">Add</button>
