@@ -25,8 +25,9 @@
 
                 <div class="left-nav-wrapper" uk-height-viewport="{'expand': true}">
                     <ul class="uk-nav uk-nav-default left-nav">
-                            <li><a href="<?php echo url('/') ?>">Home</a></li>
+                        <li><a href="<?php echo url('/') ?>">Home</a></li>
                         <li><a href="<?php echo route('enroll.index') ?>">Enroll Student</a></li>
+                        <li><a href="<?php echo route('customer_messages.index') ?>">Customer Messages</a></li>
                         <li class="uk-nav-divider"></li>
                         <li class="uk-nav-header">Users</li>
                         <li><a href="<?php echo route('teachers.index') ?>">Teachers</a></li>
