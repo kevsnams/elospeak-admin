@@ -6,37 +6,34 @@ use Illuminate\Database\Eloquent\Model;
 
 class Teacher extends Model
 {
+    const EDUC_GRADUATE = 1;
     const EDUC_UNDERGRADUATE = 0;
-    const EDUC_COLLEGE_GRADUATE = 1;
 
-    public $hidden = [
-        'password'
-    ];
+    protected $appends = [ 'educational_attainment_label' ];
+    protected $guarded = [ 'last_active' ];
+    protected $dates = [ 'birthday' ];
 
     public function classrooms()
     {
         return $this->hasMany('App\Classroom');
     }
 
-    public static function getEducationalAttainmentValues()
+    public function getAgeAttribute()
     {
-        return [
-            self::EDUC_UNDERGRADUATE => 'Undergraduate',
-            self::EDUC_COLLEGE_GRADUATE => 'College Graduate'
-        ];
+        return idate('Y') - intval($this->birthday->format('Y'));
     }
 
-    public function getFullNameAttribute($value)
+    public function getEducationalAttainmentLabelAttribute()
     {
-        return mb_convert_case($value, MB_CASE_TITLE);
-    }
+        static $educationalAttainments;
 
-    public function getAgeAttribute() {
-        return idate('Y') - idate('Y', strtotime($this->birthday));
-    }
+        if (!$educationalAttainments) {
+            $educationalAttainments = [
+                Teacher::EDUC_GRADUATE => 'Graduate',
+                Teacher::EDUC_UNDERGRADUATE => 'Undergraduate'
+            ];
+        }
 
-    public function getEducationalAttainmentValueAttribute()
-    {
-        return self::getEducationalAttainmentValues()[$this->educational_attainment];
+        return $educationalAttainments[$this->educational_attainment];
     }
 }
