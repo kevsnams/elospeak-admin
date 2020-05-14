@@ -103,8 +103,6 @@ class SettingController extends Controller
             }
         }
 
-
-
         return redirect()->back()->with('message', 'Successfully updated settings');
     }
 
