@@ -24,6 +24,7 @@ Route::middleware('auth')->group(function () {
         'students' => 'StudentController',
         'teachers' => 'TeacherController',
         'classrooms' => 'ClassroomController',
+        'messages' => 'MessageController',
         'settings' => 'SettingController',
     ]);
 });

@@ -16,6 +16,10 @@
                 'link' => route('teachers.index')
             ],
             [
+                'label' => 'Messages',
+                'link' => route('messages.index')
+            ],
+            [
                 'label' => 'Settings',
                 'link' => route('settings.index')
             ],
