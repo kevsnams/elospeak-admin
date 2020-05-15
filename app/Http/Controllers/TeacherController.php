@@ -232,7 +232,7 @@ class TeacherController extends Controller
 
         $teacher->save();
 
-        return redirect()->back()->with('message', 'Successfully update student');
+        return redirect()->back()->with('message', 'Successfully updated teacher');
     }
 
     /**
