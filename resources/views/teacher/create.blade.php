@@ -48,7 +48,10 @@
 
                         <div class="form-group row">
                             <div class="col">
-                                <label for="teacher-username" class="col-form-label">Username</label>
+                                <label for="teacher-username" class="col-form-label">
+                                    Username
+                                    <span class="badge badge-pill badge-primary" data-toggle="tooltip" title="" data-original-title="(No spaces. Only allowed: period, underscore)">?</span>
+                                </label>
                                 <input type="text" class="form-control" id="teacher-username" name="data[username]" value="{{ old('data.username') }}">
                             </div>
 
@@ -74,6 +77,13 @@
                             <div class="col">
                                 <label for="teacher-full_name" class="col-form-label">Full Name</label>
                                 <input type="text" class="form-control" id="teacher-full_name" name="data[full_name]" value="{{ old('data.full_name') }}">
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <div class="col">
+                                <label for="teacher-nickname" class="col-form-label">Nickname (Displayed Name)</label>
+                                <input type="text" class="form-control" id="teacher-nickname" name="data[nickname]" value="{{ old('data.nickname') }}">
                             </div>
                         </div>
 
@@ -134,6 +144,10 @@
     <script src="{{ asset('js/moment-2.25.2.min.js') }}"></script>
     <script src="{{ asset('pikaday-1.8.0/js/pikaday.js') }}"></script>
     <script>
+        $(function () {
+            $('[data-toggle="tooltip"]').tooltip();
+        });
+
         var now = new Date();
         var pickr = new Pikaday({
             field: document.getElementById('teacher-birthday'),

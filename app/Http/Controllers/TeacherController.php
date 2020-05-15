@@ -53,6 +53,12 @@ class TeacherController extends Controller
                 'unique:App\Teacher,username'
             ],
 
+            'data.nickname' => [
+                'required',
+                'string',
+                'max:50'
+            ],
+
             'data.email' => [
                 'required',
                 'string',

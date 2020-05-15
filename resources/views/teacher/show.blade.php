@@ -75,6 +75,9 @@
                     <dt class="col-sm-3">Email</dt>
                     <dd class="col-sm-9">{{ $teacher->email }}</dd>
 
+                    <dt class="col-sm-3">Nickname</dt>
+                    <dd class="col-sm-9">{{ $teacher->nickname }}</dd>
+
                     @if (filled($teacher->skype))
                         <dt class="col-sm-3">Skype</dt>
                         <dd class="col-sm-9">{{ $teacher->skype }}</dd>

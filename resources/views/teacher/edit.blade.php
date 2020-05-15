@@ -90,6 +90,13 @@
                             </div>
                         </div>
 
+                        <div class="form-group row">
+                            <div class="col">
+                                <label for="teacher-nickname" class="col-form-label">Nickname (Displayed Name)</label>
+                                <input type="text" class="form-control" id="teacher-nickname" name="data[nickname]" value="{{ $teacher->nickname }}">
+                            </div>
+                        </div>
+
                         <button type="submit" class="btn btn-primary">Update</button>
                         <a href="{{ route('teachers.show', [ 'teacher' => $teacher->id ]) }}" class="btn btn-secondary">Back</a>
                     </fieldset>
