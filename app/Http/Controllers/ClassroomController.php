@@ -181,7 +181,6 @@ class ClassroomController extends Controller
         $data = $request->input('data');
 
         $date = Carbon::createFromFormat('Y-m-d H:i', implode(' ', [ $data['start_date'], $data['start_time'] ]));
-
         $start = $date->format('Y-m-d H:i');
         $end = $date->addMinutes($data['duration'])->format('Y-m-d H:i');
 
