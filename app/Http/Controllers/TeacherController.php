@@ -49,6 +49,7 @@ class TeacherController extends Controller
                 'required',
                 'string',
                 'max:50',
+                'regex:/^[a-zA-Z0-9\.\_]*$/',
                 'unique:App\Teacher,username'
             ],
 

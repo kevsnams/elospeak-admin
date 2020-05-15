@@ -194,10 +194,8 @@ if ($fromPage === 'teacher' && $classroom->teacher) {
 
         var now = new Date();
         var pickr = new Pikaday({
-            field: document.getElementById('teacher-birthday'),
-            format: 'YYYY-MM-DD',
-            maxDate: now,
-            yearRange: [now.getFullYear() - 100, now.getFullYear()]
+            field: document.getElementById('classroom-start_date'),
+            format: 'YYYY-MM-DD'
         });
     </script>
 @endsection
