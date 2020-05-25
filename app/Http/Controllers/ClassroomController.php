@@ -168,7 +168,7 @@ class ClassroomController extends Controller
             'data.status' => [
                 'required',
                 'numeric',
-                Rule::in([ Classroom::STATUS_ACTIVE, Classroom::STATUS_DONE, Classroom::STATUS_DONE ])
+                Rule::in([ Classroom::STATUS_ACTIVE, Classroom::STATUS_DONE, Classroom::STATUS_CANCELLED ])
             ],
 
             'data.price' => [
