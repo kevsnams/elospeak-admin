@@ -23,6 +23,10 @@
                 'label' => 'Settings',
                 'link' => route('settings.index')
             ],
+            [
+                'label' => 'Applications',
+                'link' => route('applications.index')
+            ]
         ];
     ?>
 

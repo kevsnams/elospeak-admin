@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\SignupApplicationConrtoller;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -26,5 +27,9 @@ Route::middleware('auth')->group(function () {
         'classrooms' => 'ClassroomController',
         'messages' => 'MessageController',
         'settings' => 'SettingController',
+        'applications' => 'SignupApplicationController'
     ]);
 });
+
+Route::post('/applications/accept/{application}', 'SignupApplicationController@accept')->name('applications.accept');
+Route::post('/applications/deny/{application}', 'SignupApplicationController@deny')->name('applications.deny');
