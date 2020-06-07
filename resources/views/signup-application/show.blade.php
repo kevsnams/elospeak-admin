@@ -56,17 +56,17 @@
                         @if ($application->status == SignupApplication::STATUS_PENDING)
                             <button data-toggle="modal" data-target="#accept-modal" class="btn btn-success mr-1">Accept</button>
                             <button data-toggle="modal" data-target="#deny-modal" class="btn btn-warning">Deny</button>
-                        @endif
-
-                        @if ($application->status == SignupApplication::STATUS_ACCEPTED)
+                        @elseif ($application->status == SignupApplication::STATUS_ACCEPTED && $application->student !== null)
                             <div class="alert alert-success">
                                 This application was already processed. <a href="{{ route('students.show', [ 'student' => $application->student_id ]) }}" class="alert-link">View student account</a>.
                             </div>
-                        @endif
-
-                        @if ($application->status == SignupApplication::STATUS_DENIED)
+                        @elseif ($application->status == SignupApplication::STATUS_DENIED)
                             <div class="alert alert-danger">
                                 This applications was denied
+                            </div>
+                        @elseif ($application->student === null)
+                            <div class="alert alert-warning">
+                                The student is deleted
                             </div>
                         @endif
                     </div>

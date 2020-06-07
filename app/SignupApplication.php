@@ -14,4 +14,9 @@ class SignupApplication extends Model
     {
         return json_decode($this->attributes['data']);
     }
+
+    public function student()
+    {
+        return $this->belongsTo('App\Student');
+    }
 }
